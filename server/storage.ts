@@ -81,9 +81,12 @@ export class SupabaseStorage implements IStorage {
   }
 
   async createLanguage(language: InsertLanguage): Promise<Language> {
+    // Convert camelCase input to snake_case for Supabase
+    const snakeCaseLanguage = toSnakeCase(language);
+    
     const { data, error } = await supabase
       .from("languages")
-      .insert(language)
+      .insert(snakeCaseLanguage)
       .select()
       .single();
 
@@ -179,9 +182,12 @@ export class SupabaseStorage implements IStorage {
   }
 
   async createTranslation(translation: InsertTranslation): Promise<Translation> {
+    // Convert camelCase input to snake_case for Supabase
+    const snakeCaseTranslation = toSnakeCase(translation);
+    
     const { data, error } = await supabase
       .from("translations")
-      .insert(translation)
+      .insert(snakeCaseTranslation)
       .select()
       .single();
 
