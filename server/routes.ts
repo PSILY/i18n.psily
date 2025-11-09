@@ -305,14 +305,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Process translations in batches
       const results = await batchTranslate(requests);
 
-      // Save successful translations
+      // Save successful translations (without updating completion each time for performance)
       const created = [];
       const failed = [];
 
       for (const result of results) {
         if (result.success) {
           try {
-            const translation = await storage.createTranslation({
+            // Use bulk insert to skip individual completion updates
+            const translation = await storage.createTranslationWithoutCompletion({
               key: result.key,
               locale: targetLocale,
               text: result.translatedText,
@@ -328,8 +329,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      // Update completion percentage once at the end
+      await storage.updateLanguageCompletion(targetLocale);
+
       res.json({
-        message: `AI translation completed`,
+        message: `AI translation completed: ${created.length} translations created`,
         created: created.length,
         failed: failed.length,
         failures: failed,

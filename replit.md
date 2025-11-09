@@ -167,7 +167,7 @@ server/
 - no (Norsk/Norwegian)
 
 ## Recent Changes
-- 2025-11-09: Production-ready MVP complete
+- 2025-11-09: Production-ready MVP complete with AI translation working
   - Initial schema and frontend implementation complete
   - All components built following design_guidelines.md
   - Configured psilyou brand colors and Inter typography
@@ -182,9 +182,9 @@ server/
   - Fixed authentication: Added JWT token handling in frontend with mock token for development
   - Fixed data mapping: Implemented bidirectional snake_case ↔ camelCase conversion for all CRUD operations
   - Created languages table in user's Supabase database with 6 languages (en, da, sv, de, no, fr)
-  - Calculated completion percentages based on existing translations
-  - Added setup endpoints: /api/setup/create-languages, /api/setup/recalculate-completion
-  - Tested all features end-to-end: Languages page, Translations page, Analytics page all working
+  - Fixed completion percentage calculation: Now based on translation coverage (target/English) instead of review status
+  - Optimized AI translation: Single completion update at end instead of per-translation
+  - Tested AI translation end-to-end: Danish and Swedish both at 100% completion with 94 translations each
 
 ## Setup Instructions
 

@@ -30,6 +30,7 @@ export interface IStorage {
     namespace: string
   ): Promise<Translation[]>;
   createTranslation(translation: InsertTranslation): Promise<Translation>;
+  createTranslationWithoutCompletion(translation: InsertTranslation): Promise<Translation>;
   updateTranslation(
     key: string,
     locale: string,
@@ -110,15 +111,28 @@ export class SupabaseStorage implements IStorage {
   }
 
   async updateLanguageCompletion(locale: string): Promise<void> {
-    // Get total and reviewed count for this language
-    const { data: stats } = await supabase
+    // Skip completion calculation for English (source language)
+    if (locale === "en") {
+      await this.updateLanguage(locale, { completionPercent: 100 });
+      return;
+    }
+
+    // Get total translations for this locale
+    const { count: targetCount } = await supabase
       .from("translations")
-      .select("reviewed", { count: "exact" })
+      .select("*", { count: "exact", head: true })
       .eq("locale", locale);
 
-    const total = stats?.length || 0;
-    const reviewed = stats?.filter((t) => t.reviewed).length || 0;
-    const completionPercent = total > 0 ? Math.round((reviewed / total) * 100) : 0;
+    // Get total English translations (source language)
+    const { count: englishCount } = await supabase
+      .from("translations")
+      .select("*", { count: "exact", head: true })
+      .eq("locale", "en");
+
+    const completionPercent =
+      englishCount && englishCount > 0
+        ? Math.round(((targetCount || 0) / englishCount) * 100)
+        : 0;
 
     await this.updateLanguage(locale, { completionPercent });
   }
@@ -196,6 +210,20 @@ export class SupabaseStorage implements IStorage {
     // Update language completion
     await this.updateLanguageCompletion(translation.locale);
 
+    return toCamelCase<Translation>(data);
+  }
+
+  async createTranslationWithoutCompletion(translation: InsertTranslation): Promise<Translation> {
+    // Same as createTranslation but without updating completion (for batch operations)
+    const snakeCaseTranslation = toSnakeCase(translation);
+    
+    const { data, error } = await supabase
+      .from("translations")
+      .insert(snakeCaseTranslation)
+      .select()
+      .single();
+
+    if (error) throw error;
     return toCamelCase<Translation>(data);
   }
 
