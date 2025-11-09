@@ -1,4 +1,4 @@
-import { supabase, toCamelCase } from "./lib/supabase";
+import { supabase, toCamelCase, toSnakeCase } from "./lib/supabase";
 import type {
   Translation,
   InsertTranslation,
@@ -92,9 +92,12 @@ export class SupabaseStorage implements IStorage {
   }
 
   async updateLanguage(locale: string, updates: Partial<Language>): Promise<Language> {
+    // Convert camelCase updates to snake_case for Supabase
+    const snakeCaseUpdates = toSnakeCase({ ...updates, updated_at: new Date().toISOString() });
+    
     const { data, error } = await supabase
       .from("languages")
-      .update({ ...updates, updated_at: new Date().toISOString() })
+      .update(snakeCaseUpdates)
       .eq("locale", locale)
       .select()
       .single();
@@ -196,9 +199,12 @@ export class SupabaseStorage implements IStorage {
     namespace: string,
     updates: Partial<Translation>
   ): Promise<Translation> {
+    // Convert camelCase updates to snake_case for Supabase
+    const snakeCaseUpdates = toSnakeCase({ ...updates, updated_at: new Date().toISOString() });
+    
     const { data, error } = await supabase
       .from("translations")
-      .update({ ...updates, updated_at: new Date().toISOString() })
+      .update(snakeCaseUpdates)
       .eq("key", key)
       .eq("locale", locale)
       .eq("namespace", namespace)

@@ -22,6 +22,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Create languages table and seed data
+  app.post("/api/setup/create-languages", async (req, res) => {
+    try {
+      await seedLanguages();
+      res.json({
+        message: "Languages table populated successfully",
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Recalculate completion percentages for all languages
+  app.post("/api/setup/recalculate-completion", async (req, res) => {
+    try {
+      const languages = await storage.getAllLanguages();
+      for (const lang of languages) {
+        await storage.updateLanguageCompletion(lang.locale);
+      }
+      const updated = await storage.getAllLanguages();
+      res.json({
+        message: "Completion percentages updated successfully",
+        languages: updated,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // PUBLIC ENDPOINTS - No authentication required
 
   // Get all live languages for language switchers

@@ -31,6 +31,20 @@ export function toCamelCase<T = any>(obj: any): T {
   return obj;
 }
 
+// Utility to convert camelCase to snake_case
+export function toSnakeCase<T = any>(obj: any): T {
+  if (Array.isArray(obj)) {
+    return obj.map((item) => toSnakeCase(item)) as T;
+  } else if (obj !== null && typeof obj === "object") {
+    return Object.keys(obj).reduce((acc, key) => {
+      const snakeKey = key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+      acc[snakeKey] = toSnakeCase(obj[key]);
+      return acc;
+    }, {} as any) as T;
+  }
+  return obj;
+}
+
 // Database initialization script
 export async function initializeDatabase() {
   const createTablesSQL = `
@@ -77,8 +91,34 @@ export async function initializeDatabase() {
   }
 }
 
-// Seed initial language data
+// Create languages table and seed initial data
 export async function seedLanguages() {
+  // First, try to create the table using raw SQL via Supabase REST API
+  const createTableSQL = `
+    CREATE TABLE IF NOT EXISTS languages (
+      locale VARCHAR(10) PRIMARY KEY,
+      name VARCHAR(50) NOT NULL,
+      native_name VARCHAR(50) NOT NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'draft',
+      completion_percent INTEGER NOT NULL DEFAULT 0,
+      display_order INTEGER NOT NULL DEFAULT 0,
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+  `;
+
+  try {
+    // Execute the CREATE TABLE SQL directly using Supabase client
+    // Note: This uses the query builder which may not support DDL
+    // If it fails, the table might already exist or we need to use REST API
+    const { error: createError } = await supabase.rpc('exec', { sql: createTableSQL });
+    if (createError) {
+      console.log("Note: Could not create table via RPC, attempting to seed anyway...");
+    }
+  } catch (e) {
+    console.log("Note: Proceeding to seed languages...");
+  }
+
+  // Seed initial language data
   const initialLanguages = [
     {
       locale: "en",
@@ -128,7 +168,8 @@ export async function seedLanguages() {
       .upsert(lang, { onConflict: "locale" });
 
     if (error) {
-      console.error(`Error seeding language ${lang.locale}:`, error);
+      console.error(`Error seeding language ${lang.locale}:`, error.message);
+      throw new Error(`Failed to seed languages: ${error.message}`);
     }
   }
 
