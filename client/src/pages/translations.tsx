@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -16,14 +18,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Search, CheckCircle2, Circle, Edit2, Save, X } from "lucide-react";
+import { Search, CheckCircle2, Circle, Languages } from "lucide-react";
 import type { Translation, Language, TranslationFilters } from "@shared/schema";
+
+interface TranslationsByKey {
+  [key: string]: {
+    key: string;
+    namespace: string;
+    english: string;
+    translations: Translation[];
+  };
+}
 
 export default function TranslationsPage() {
   const [filters, setFilters] = useState<TranslationFilters>({});
-  const [editingKey, setEditingKey] = useState<string | null>(null);
-  const [editText, setEditText] = useState("");
-  const [editReviewed, setEditReviewed] = useState(false);
+  const [editingValues, setEditingValues] = useState<{
+    [id: string]: { text: string; reviewed: boolean };
+  }>({});
   const { toast } = useToast();
 
   // Use shared namespace selector hook (without auto-selection for "All Namespaces" support)
@@ -36,6 +47,71 @@ export default function TranslationsPage() {
   const { data: translations, isLoading: translationsLoading } = useQuery<Translation[]>({
     queryKey: ["/api/admin/translations", filters],
   });
+
+  // Group translations by namespace + key
+  const translationsByKey: TranslationsByKey = {};
+  if (translations) {
+    translations.forEach((t) => {
+      const compositeKey = `${t.namespace}::${t.key}`;
+      if (!translationsByKey[compositeKey]) {
+        const englishTranslation = translations.find(
+          (tr) => tr.key === t.key && tr.locale === "en" && tr.namespace === t.namespace
+        );
+        translationsByKey[compositeKey] = {
+          key: t.key,
+          namespace: t.namespace,
+          english: englishTranslation?.text || "",
+          translations: [],
+        };
+      }
+      if (t.locale !== "en") {
+        translationsByKey[compositeKey].translations.push(t);
+      }
+    });
+  }
+
+  const groupedKeys = Object.values(translationsByKey);
+
+  // Track pending saves for debouncing
+  const [pendingSaves, setPendingSaves] = useState<{
+    [id: string]: { translation: Translation; newText: string };
+  }>({});
+
+  // Initialize editing values when translations load
+  useEffect(() => {
+    if (translations) {
+      const initialValues: typeof editingValues = {};
+      translations.forEach((t) => {
+        if (t.locale !== "en") {
+          const id = `${t.key}-${t.locale}-${t.namespace}`;
+          initialValues[id] = { text: t.text, reviewed: t.reviewed };
+        }
+      });
+      setEditingValues(initialValues);
+    }
+  }, [translations]);
+
+  // Debounced autosave effect - saves 1 second after user stops typing
+  useEffect(() => {
+    if (Object.keys(pendingSaves).length === 0) return;
+
+    const timeoutId = setTimeout(() => {
+      // Save all pending changes
+      Object.entries(pendingSaves).forEach(([id, { translation, newText }]) => {
+        updateMutation.mutate({
+          key: translation.key,
+          locale: translation.locale,
+          namespace: translation.namespace,
+          updates: {
+            text: newText,
+          },
+        });
+      });
+      setPendingSaves({});
+    }, 1000); // 1 second debounce
+
+    return () => clearTimeout(timeoutId);
+  }, [pendingSaves]);
 
   const updateMutation = useMutation({
     mutationFn: async ({
@@ -73,44 +149,71 @@ export default function TranslationsPage() {
     },
   });
 
-  const handleEdit = (translation: Translation) => {
-    setEditingKey(`${translation.key}-${translation.locale}-${translation.namespace}`);
-    setEditText(translation.text);
-    setEditReviewed(translation.reviewed);
+  const handleTextChange = (id: string, text: string, translation: Translation) => {
+    // Update local editing state immediately
+    setEditingValues((prev) => ({
+      ...prev,
+      [id]: { ...prev[id], text },
+    }));
+
+    // Schedule debounced save if text actually changed from original
+    if (text !== translation.text) {
+      setPendingSaves((prev) => ({
+        ...prev,
+        [id]: { translation, newText: text },
+      }));
+    } else {
+      // Remove from pending saves if text reverted to original
+      setPendingSaves((prev) => {
+        const { [id]: _, ...rest } = prev;
+        return rest;
+      });
+    }
   };
 
-  const handleCancel = () => {
-    setEditingKey(null);
-    setEditText("");
-    setEditReviewed(false);
-  };
+  const handleReviewedToggle = (translation: Translation) => {
+    const id = `${translation.key}-${translation.locale}-${translation.namespace}`;
+    const currentValue = editingValues[id];
+    if (!currentValue) return;
 
-  const handleSave = (translation: Translation) => {
+    const newReviewed = !currentValue.reviewed;
+    setEditingValues((prev) => ({
+      ...prev,
+      [id]: { ...prev[id], reviewed: newReviewed },
+    }));
+
+    // Immediately save the reviewed status
     updateMutation.mutate({
       key: translation.key,
       locale: translation.locale,
       namespace: translation.namespace,
       updates: {
-        text: editText,
-        reviewed: editReviewed,
-      },
-    });
-    handleCancel();
-  };
-
-  const handleToggleReviewed = (translation: Translation) => {
-    updateMutation.mutate({
-      key: translation.key,
-      locale: translation.locale,
-      namespace: translation.namespace,
-      updates: {
-        reviewed: !translation.reviewed,
+        reviewed: newReviewed,
       },
     });
   };
 
-  const isEditing = (translation: Translation) =>
-    editingKey === `${translation.key}-${translation.locale}-${translation.namespace}`;
+  const handleBlur = (translation: Translation) => {
+    const id = `${translation.key}-${translation.locale}-${translation.namespace}`;
+    
+    // If there's a pending save for this field, save it immediately on blur
+    if (pendingSaves[id]) {
+      updateMutation.mutate({
+        key: translation.key,
+        locale: translation.locale,
+        namespace: translation.namespace,
+        updates: {
+          text: pendingSaves[id].newText,
+        },
+      });
+      
+      // Remove from pending saves
+      setPendingSaves((prev) => {
+        const { [id]: _, ...rest } = prev;
+        return rest;
+      });
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -230,174 +333,132 @@ export default function TranslationsPage() {
         </div>
       </Card>
 
-      <Card>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="border-b border-card-border bg-muted/30">
-              <tr>
-                <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">
-                  Key
-                </th>
-                <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">
-                  Locale
-                </th>
-                <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">
-                  Namespace
-                </th>
-                <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">
-                  Text
-                </th>
-                <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">
-                  Status
-                </th>
-                <th className="text-right text-xs font-medium text-muted-foreground px-4 py-3">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {translationsLoading ? (
-                Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i}>
-                    <td className="px-4 py-3" colSpan={6}>
-                      <Skeleton className="h-10 w-full" />
-                    </td>
-                  </tr>
-                ))
-              ) : !translations || translations.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-4 py-12 text-center">
-                    <div className="flex flex-col items-center gap-2">
-                      <Search className="w-8 h-8 text-muted-foreground" />
-                      <p className="text-sm text-muted-foreground">No translations found</p>
-                      <p className="text-xs text-muted-foreground">
-                        Try adjusting your filters or add new translations
-                      </p>
+      <div className="space-y-4">
+        {translationsLoading ? (
+          Array.from({ length: 5 }).map((_, i) => (
+            <Card key={i} className="p-6">
+              <Skeleton className="h-24 w-full" />
+            </Card>
+          ))
+        ) : !groupedKeys || groupedKeys.length === 0 ? (
+          <Card className="p-12">
+            <div className="flex flex-col items-center gap-2">
+              <Search className="w-8 h-8 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">No translations found</p>
+              <p className="text-xs text-muted-foreground">
+                Try adjusting your filters or add new translations
+              </p>
+            </div>
+          </Card>
+        ) : (
+          groupedKeys.map((group) => (
+            <Card key={`${group.key}-${group.namespace}`} className="p-6" data-testid={`card-translation-${group.key}`}>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Column 1: Key + English */}
+                <div className="space-y-2">
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Translation Key</Label>
+                    <code className="block text-sm font-mono text-foreground mt-1">
+                      {group.key}
+                    </code>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Namespace</Label>
+                    <p className="text-sm text-foreground mt-1">{group.namespace}</p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">English (Reference)</Label>
+                    <p className="text-sm text-foreground mt-1 p-3 bg-muted/30 rounded-md">
+                      {group.english || <span className="text-muted-foreground italic">No English translation</span>}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Column 2: Other Languages */}
+                <div className="space-y-3">
+                  <Label className="text-xs text-muted-foreground">Translations</Label>
+                  {group.translations.length === 0 ? (
+                    <div className="p-6 bg-muted/30 rounded-md flex items-center justify-center">
+                      <p className="text-xs text-muted-foreground italic">No translations yet</p>
                     </div>
-                  </td>
-                </tr>
-              ) : (
-                translations.map((translation) => (
-                  <tr
-                    key={`${translation.key}-${translation.locale}-${translation.namespace}`}
-                    className="hover-elevate"
-                    data-testid={`row-translation-${translation.key}`}
-                  >
-                    <td className="px-4 py-3">
-                      <code className="text-xs font-mono text-foreground">
-                        {translation.key}
-                      </code>
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge variant="outline" className="text-xs font-mono">
-                        {translation.locale}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="text-sm text-muted-foreground">
-                        {translation.namespace}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 max-w-md">
-                      {isEditing(translation) ? (
-                        <div className="space-y-2">
-                          <Input
-                            value={editText}
-                            onChange={(e) => setEditText(e.target.value)}
-                            className="text-sm"
-                            data-testid={`input-edit-${translation.key}`}
-                            autoFocus
-                          />
+                  ) : (
+                    group.translations.map((t) => {
+                      const id = `${t.key}-${t.locale}-${t.namespace}`;
+                      const currentValue = editingValues[id];
+                      const language = languages?.find((l) => l.locale === t.locale);
+
+                      return (
+                        <div key={id} className="space-y-1">
                           <div className="flex items-center gap-2">
-                            <Checkbox
-                              id={`reviewed-${translation.key}`}
-                              checked={editReviewed}
-                              onCheckedChange={(checked) => setEditReviewed(checked as boolean)}
-                              data-testid={`checkbox-reviewed-${translation.key}`}
-                            />
-                            <label
-                              htmlFor={`reviewed-${translation.key}`}
-                              className="text-xs text-muted-foreground cursor-pointer"
-                            >
-                              Mark as reviewed
-                            </label>
+                            <Badge variant="outline" className="text-xs font-mono">
+                              {t.locale}
+                            </Badge>
+                            <span className="text-xs text-muted-foreground">
+                              {language?.nativeName || t.locale}
+                            </span>
                           </div>
+                          <Textarea
+                            value={currentValue?.text || ""}
+                            onChange={(e) => handleTextChange(id, e.target.value, t)}
+                            onBlur={() => handleBlur(t)}
+                            className="text-sm min-h-[60px] resize-none"
+                            data-testid={`input-translation-${t.key}-${t.locale}`}
+                            placeholder="Enter translation..."
+                          />
                         </div>
-                      ) : (
-                        <p className="text-sm text-foreground truncate">
-                          {translation.text}
-                        </p>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {isEditing(translation) ? null : translation.reviewed ? (
-                        <Badge
-                          className="gap-1 bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20 cursor-pointer hover-elevate"
-                          onClick={() => handleToggleReviewed(translation)}
-                          data-testid={`badge-reviewed-${translation.key}`}
-                        >
-                          <CheckCircle2 className="w-3 h-3" />
-                          Reviewed
-                        </Badge>
-                      ) : (
-                        <Badge
-                          variant="secondary"
-                          className="gap-1 cursor-pointer hover-elevate"
-                          onClick={() => handleToggleReviewed(translation)}
-                          data-testid={`badge-draft-${translation.key}`}
-                        >
-                          <Circle className="w-3 h-3" />
-                          Draft
-                        </Badge>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-2">
-                        {isEditing(translation) ? (
-                          <>
-                            <Button
-                              size="sm"
-                              onClick={() => handleSave(translation)}
-                              data-testid={`button-save-${translation.key}`}
-                              className="h-7 px-2"
-                              disabled={updateMutation.isPending}
-                            >
-                              <Save className="w-3 h-3 mr-1" />
-                              Save
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={handleCancel}
-                              data-testid={`button-cancel-${translation.key}`}
-                              className="h-7 px-2"
-                              disabled={updateMutation.isPending}
-                            >
-                              <X className="w-3 h-3 mr-1" />
-                              Cancel
-                            </Button>
-                          </>
-                        ) : (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleEdit(translation)}
-                            data-testid={`button-edit-${translation.key}`}
-                            className="h-7 px-2"
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* Column 3: Review Status */}
+                <div className="space-y-3">
+                  <Label className="text-xs text-muted-foreground">Review Status</Label>
+                  {group.translations.length === 0 ? (
+                    <div className="p-6 bg-muted/30 rounded-md flex items-center justify-center">
+                      <Languages className="w-6 h-6 text-muted-foreground" />
+                    </div>
+                  ) : (
+                    group.translations.map((t) => {
+                      const id = `${t.key}-${t.locale}-${t.namespace}`;
+                      const currentValue = editingValues[id];
+                      const isReviewed = currentValue?.reviewed || false;
+
+                      return (
+                        <div key={id} className="flex items-center justify-between p-3 bg-muted/30 rounded-md">
+                          <span className="text-xs font-mono text-muted-foreground">{t.locale}</span>
+                          <Badge
+                            className={
+                              isReviewed
+                                ? "gap-1 bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20 cursor-pointer hover-elevate"
+                                : "gap-1 cursor-pointer hover-elevate"
+                            }
+                            variant={isReviewed ? "default" : "secondary"}
+                            onClick={() => handleReviewedToggle(t)}
+                            data-testid={`badge-reviewed-${t.key}-${t.locale}`}
                           >
-                            <Edit2 className="w-3 h-3 mr-1" />
-                            Edit
-                          </Button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+                            {isReviewed ? (
+                              <>
+                                <CheckCircle2 className="w-3 h-3" />
+                                Reviewed
+                              </>
+                            ) : (
+                              <>
+                                <Circle className="w-3 h-3" />
+                                Draft
+                              </>
+                            )}
+                          </Badge>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </Card>
+          ))
+        )}
+      </div>
     </div>
   );
 }
