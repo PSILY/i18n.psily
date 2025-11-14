@@ -84,21 +84,28 @@ server/
 
 ## Features
 
-### 1. Translation Management UI
+### 1. Translation Management UI (Redesigned ✨)
+- **3-column layout grouped by translation key** (namespace::key composite grouping)
+  - Column 1: Translation key, namespace, and English reference text
+  - Column 2: All other languages as editable textarea inputs stacked vertically
+  - Column 3: Review status badges with instant toggle functionality
+- **Debounced autosave** - saves 1 second after typing stops, or immediately on blur
 - Filter by namespace, locale, and review status
 - Search by key or text content
-- Inline editing of translation text
-- Mark translations as reviewed
+- Inline editing with real-time feedback
+- One-click review status toggle per language
 - Beautiful loading, error, and empty states
-- Responsive table with pagination
+- Responsive card-based layout
 
 ### 2. Language Management (Namespace-Aware)
+- **Shared namespace selector** with localStorage persistence and validation
 - Grid of language cards showing completion stats **per selected namespace**
 - Add new language (creates draft status)
 - AI translate all keys in a namespace
 - Language status automatically promoted to 'live' when 95%+ complete in that namespace
 - Archive unused languages
 - Progress bars showing completion percentage for the selected namespace
+- **Production-ready error handling** - distinct error/empty states with retry buttons
 - **Key feature:** Same language can be 'live' in one namespace and 'draft' in another
 
 ### 3. AI Translation (OpenAI)
@@ -172,6 +179,27 @@ server/
 - no (Norsk/Norwegian)
 
 ## Recent Changes
+- 2025-11-14: **Translations Page Complete UX Redesign** ✨
+  - Implemented 3-column card-based layout grouped by translation key
+  - Added debounced autosave (1-second delay) for seamless editing experience
+  - Immediate save on blur for instant feedback
+  - Side-by-side view of English reference and all translations
+  - One-click review status toggle per language
+  - Composite key grouping (namespace::key) prevents cross-namespace data corruption
+  - All changes properly invalidate TanStack Query cache
+  - Comprehensive e2e testing with Playwright - all tests passing ✅
+
+- 2025-11-14: **Shared Namespace Selector Implementation**
+  - Created reusable `useNamespaceSelector` hook with localStorage persistence
+  - Auto-hydrates from localStorage on page load
+  - Validates persisted namespace against fetched list (clears if invalid)
+  - Configurable `autoSelect` and `persist` options
+  - Integrated into Languages page with namespace-aware queries
+  - Integrated into Translations page with "All Namespaces" support
+  - Production-ready error handling for all failure modes
+  - Distinct error states with retry buttons for namespace/language query failures
+  - Proper loading skeletons and empty states
+
 - 2025-11-14: **Namespace-aware language status implementation**
   - **Breaking change:** Language status and completion are now calculated **dynamically per namespace**
   - Removed `language_namespaces` junction table - no longer needed with dynamic calculation
@@ -230,10 +258,27 @@ npm run dev
 The app will be available at http://localhost:5000
 
 ## Testing the Application
-1. Navigate to the Translations page to view and edit translations
-2. Go to Languages page to manage languages and trigger AI translations
-3. Check Analytics page for completion stats and untranslated keys
-4. Test the AI translation feature by selecting a namespace and target language
+1. **Translations Page** (NEW 3-Column Design):
+   - View translations grouped by key with English reference
+   - Edit any translation inline - auto-saves after 1 second of inactivity
+   - Click review badges to instantly toggle review status
+   - Filter by namespace, language, review status, or search
+   - Experience smooth, modern editing workflow
+
+2. **Languages Page**:
+   - Select a namespace from dropdown to view completion stats
+   - Add new languages or archive unused ones
+   - Trigger AI translation for any language in selected namespace
+   - View real-time completion percentages per namespace
+
+3. **Analytics Page**:
+   - View overall stats and completion by namespace
+   - See recently updated translations
+   - Identify untranslated keys grouped by namespace
+
+4. **E2e Testing**:
+   - All core functionality verified with Playwright
+   - Debounced autosave, review toggles, filtering all tested and working ✅
 
 ## Next Steps for Production
 1. Replace mock JWT with real authentication from admin.psilyou.com
