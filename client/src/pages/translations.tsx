@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useNamespaceSelector } from "@/hooks/use-namespace-selector";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -25,12 +26,11 @@ export default function TranslationsPage() {
   const [editReviewed, setEditReviewed] = useState(false);
   const { toast } = useToast();
 
+  // Use shared namespace selector hook (without auto-selection for "All Namespaces" support)
+  const { namespaces, namespacesLoading } = useNamespaceSelector({ autoSelect: false });
+
   const { data: languages, isLoading: languagesLoading } = useQuery<Language[]>({
     queryKey: ["/api/admin/languages"],
-  });
-
-  const { data: namespaces, isLoading: namespacesLoading } = useQuery<string[]>({
-    queryKey: ["/api/admin/namespaces"],
   });
 
   const { data: translations, isLoading: translationsLoading } = useQuery<Translation[]>({
@@ -151,7 +151,7 @@ export default function TranslationsPage() {
                     Loading...
                   </SelectItem>
                 ) : (
-                  namespaces?.map((ns) => (
+                  namespaces.map((ns) => (
                     <SelectItem key={ns} value={ns}>
                       {ns}
                     </SelectItem>

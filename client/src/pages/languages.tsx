@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useNamespaceSelector } from "@/hooks/use-namespace-selector";
 import { Card, CardContent, CardHeader, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -26,12 +27,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Plus, Sparkles, ArrowUp, Archive, Globe, Loader2 } from "lucide-react";
-import type { Language } from "@shared/schema";
+import type { LanguageWithNamespaceStatus } from "@shared/schema";
 
 export default function LanguagesPage() {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [aiDialogOpen, setAiDialogOpen] = useState<string | null>(null);
-  const [selectedNamespace, setSelectedNamespace] = useState<string>("");
   const [newLanguage, setNewLanguage] = useState({
     locale: "",
     name: "",
@@ -39,12 +39,17 @@ export default function LanguagesPage() {
   });
   const { toast } = useToast();
 
-  const { data: languages, isLoading } = useQuery<Language[]>({
-    queryKey: ["/api/admin/languages"],
-  });
+  // Use shared namespace selector hook
+  const {
+    selectedNamespace,
+    setSelectedNamespace,
+    namespaces,
+    namespacesLoading,
+  } = useNamespaceSelector();
 
-  const { data: namespaces } = useQuery<string[]>({
-    queryKey: ["/api/admin/namespaces"],
+  const { data: languages, isLoading, error: languagesError } = useQuery<LanguageWithNamespaceStatus[]>({
+    queryKey: ["/api/admin/languages", { namespace: selectedNamespace }],
+    enabled: !!selectedNamespace, // Only fetch when namespace is selected
   });
 
   const createMutation = useMutation({
@@ -113,7 +118,6 @@ export default function LanguagesPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/languages"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/analytics"] });
       setAiDialogOpen(null);
-      setSelectedNamespace("");
       toast({
         title: "AI Translation Complete",
         description: `Created ${data.created} translations. ${data.failed} failed.`,
@@ -177,20 +181,46 @@ export default function LanguagesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex-1">
           <h1 className="text-2xl font-semibold text-foreground">Languages</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Manage translation languages and their status
           </p>
         </div>
-        <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
-          <DialogTrigger asChild>
-            <Button data-testid="button-add-language">
-              <Plus className="w-4 h-4 mr-2" />
-              Add Language
-            </Button>
-          </DialogTrigger>
+        <div className="flex items-center gap-3">
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs text-muted-foreground">Namespace</Label>
+            <Select
+              value={selectedNamespace}
+              onValueChange={setSelectedNamespace}
+              disabled={namespacesLoading}
+            >
+              <SelectTrigger className="w-[200px]" data-testid="select-namespace">
+                <SelectValue placeholder="Select namespace" />
+              </SelectTrigger>
+              <SelectContent>
+                {namespacesLoading ? (
+                  <SelectItem value="loading" disabled>
+                    Loading...
+                  </SelectItem>
+                ) : (
+                  namespaces.map((ns) => (
+                    <SelectItem key={ns} value={ns}>
+                      {ns}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+          <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+            <DialogTrigger asChild>
+              <Button data-testid="button-add-language" className="mt-5">
+                <Plus className="w-4 h-4 mr-2" />
+                Add Language
+              </Button>
+            </DialogTrigger>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Add New Language</DialogTitle>
@@ -256,9 +286,10 @@ export default function LanguagesPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
-      {isLoading ? (
+      {namespacesLoading || isLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {Array.from({ length: 6 }).map((_, i) => (
             <Card key={i}>
@@ -273,6 +304,52 @@ export default function LanguagesPage() {
             </Card>
           ))}
         </div>
+      ) : namespacesError ? (
+        <Card className="p-12 border-destructive/50">
+          <div className="flex flex-col items-center gap-4">
+            <div className="text-center">
+              <p className="text-sm font-medium text-foreground">Failed to load namespaces</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Please check your connection and try again
+              </p>
+            </div>
+            <Button
+              onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/admin/namespaces"] })}
+              data-testid="button-retry-namespaces"
+            >
+              Retry
+            </Button>
+          </div>
+        </Card>
+      ) : !selectedNamespace || namespaces.length === 0 ? (
+        <Card className="p-12">
+          <div className="flex flex-col items-center gap-4">
+            <Globe className="w-12 h-12 text-muted-foreground" />
+            <div className="text-center">
+              <p className="text-sm font-medium text-foreground">No namespaces available</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Contact your administrator to create a namespace
+              </p>
+            </div>
+          </div>
+        </Card>
+      ) : languagesError ? (
+        <Card className="p-12 border-destructive/50">
+          <div className="flex flex-col items-center gap-4">
+            <div className="text-center">
+              <p className="text-sm font-medium text-foreground">Failed to load languages</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Please check your connection and try again
+              </p>
+            </div>
+            <Button
+              onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/admin/languages", { namespace: selectedNamespace }] })}
+              data-testid="button-retry-languages"
+            >
+              Retry
+            </Button>
+          </div>
+        </Card>
       ) : !languages || languages.length === 0 ? (
         <Card className="p-12">
           <div className="flex flex-col items-center gap-4">
@@ -308,8 +385,8 @@ export default function LanguagesPage() {
                       <h3 className="font-medium text-foreground">{language.nativeName}</h3>
                       <p className="text-sm text-muted-foreground">{language.name}</p>
                     </div>
-                    <Badge className={getStatusColor(language.status)} variant="outline">
-                      {language.status}
+                    <Badge className={getStatusColor(language.status || 'draft')} variant="outline">
+                      {language.status || 'draft'}
                     </Badge>
                   </div>
                 </CardHeader>
@@ -318,12 +395,12 @@ export default function LanguagesPage() {
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-muted-foreground">Completion</span>
                       <span
-                        className={`font-semibold ${getCompletionColor(language.completionPercent)}`}
+                        className={`font-semibold ${getCompletionColor(language.completionPercent || 0)}`}
                       >
-                        {language.completionPercent}%
+                        {language.completionPercent || 0}%
                       </span>
                     </div>
-                    <Progress value={language.completionPercent} className="h-2" />
+                    <Progress value={language.completionPercent || 0} className="h-2" />
                   </div>
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     <code className="font-mono bg-muted px-2 py-0.5 rounded">
@@ -362,21 +439,12 @@ export default function LanguagesPage() {
                           <div className="space-y-4 py-4">
                             <div className="space-y-2">
                               <Label>Namespace</Label>
-                              <Select
-                                value={selectedNamespace}
-                                onValueChange={setSelectedNamespace}
-                              >
-                                <SelectTrigger data-testid="select-ai-namespace">
-                                  <SelectValue placeholder="Select namespace" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {namespaces?.map((ns) => (
-                                    <SelectItem key={ns} value={ns}>
-                                      {ns}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                              <div className="rounded-md bg-muted px-3 py-2 text-sm">
+                                {selectedNamespace || "No namespace selected"}
+                              </div>
+                              <p className="text-xs text-muted-foreground">
+                                AI translation will use the currently selected namespace
+                              </p>
                             </div>
                             <div className="rounded-md bg-amber-500/10 border border-amber-500/20 p-3">
                               <p className="text-xs text-amber-700 dark:text-amber-400">
@@ -389,10 +457,7 @@ export default function LanguagesPage() {
                           <DialogFooter>
                             <Button
                               variant="outline"
-                              onClick={() => {
-                                setAiDialogOpen(null);
-                                setSelectedNamespace("");
-                              }}
+                              onClick={() => setAiDialogOpen(null)}
                               data-testid="button-cancel-ai"
                               disabled={aiTranslateMutation.isPending}
                             >
@@ -418,7 +483,7 @@ export default function LanguagesPage() {
                           </DialogFooter>
                         </DialogContent>
                       </Dialog>
-                      {language.completionPercent >= 95 && (
+                      {(language.completionPercent || 0) >= 95 && (
                         <Button
                           size="sm"
                           className="flex-1"

@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { neon } from "@neondatabase/serverless";
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -16,6 +17,29 @@ export const supabase = createClient(supabaseUrl, supabaseServiceKey, {
     schema: "public",
   },
 });
+
+// Direct PostgreSQL connection for raw SQL queries (workaround for schema cache issues)
+// Extract the database connection string from Supabase URL
+function buildDatabaseUrl(): string {
+  if (!supabaseUrl || !supabaseServiceKey) {
+    throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY required");
+  }
+  
+  // Extract project ref from Supabase URL (e.g., https://abc123.supabase.co -> abc123)
+  const projectRef = supabaseUrl.replace("https://", "").replace("http://", "").split(".")[0];
+  
+  // Supabase database connection string format for Neon/Supabase v2
+  // Use direct connection (port 5432) or session pooler (port 6543)
+  // Format: postgresql://postgres.[YOUR-PROJECT-REF]:[YOUR-PASSWORD]@aws-0-us-east-1.pooler.supabase.com:6543/postgres
+  const password = encodeURIComponent(supabaseServiceKey);
+  return `postgresql://postgres.${projectRef}:${password}@aws-0-us-east-1.pooler.supabase.com:6543/postgres`;
+}
+
+// Use Supabase connection string (not the local DATABASE_URL)
+const databaseUrl = buildDatabaseUrl();
+console.log(`[Supabase] Connecting to database pooler...`);
+
+export const sql = neon(databaseUrl);
 
 // Utility to convert snake_case to camelCase
 export function toCamelCase<T = any>(obj: any): T {

@@ -72,14 +72,37 @@ export class SupabaseStorage implements IStorage {
     // Get all languages first
     const languages = await this.getAllLanguages();
     
-    // Then get namespace status for each language
+    // Get English baseline count once (optimization to avoid duplicate queries)
+    const { count: englishCount } = await supabase
+      .from("translations")
+      .select("*", { count: "exact", head: true })
+      .eq("locale", "en")
+      .eq("namespace", namespace);
+    
+    // Calculate status and completion dynamically from translations table
     const withStatus = await Promise.all(
       languages.map(async (lang) => {
-        const langNamespace = await this.getLanguageNamespace(lang.locale, namespace);
+        // Optimization: reuse English count if this is the English language
+        const langCount = lang.locale === "en" 
+          ? englishCount 
+          : (await supabase
+              .from("translations")
+              .select("*", { count: "exact", head: true })
+              .eq("locale", lang.locale)
+              .eq("namespace", namespace)).count;
+
+        const completionPercent =
+          englishCount && englishCount > 0
+            ? Math.round(((langCount || 0) / englishCount) * 100)
+            : 0;
+
+        // Determine status: live if 95%+ complete, otherwise draft
+        const status = completionPercent >= 95 ? 'live' : 'draft';
+
         return {
           ...lang,
-          status: langNamespace?.status || 'draft',
-          completionPercent: langNamespace?.completionPercent || 0,
+          status,
+          completionPercent,
         };
       })
     );
@@ -133,29 +156,43 @@ export class SupabaseStorage implements IStorage {
     return toCamelCase<Language>(data);
   }
 
-  // Language-Namespace junction methods
+  // Language-Namespace junction methods (calculating dynamically - no separate table needed)
   async getLanguageNamespace(locale: string, namespace: string): Promise<LanguageNamespace | null> {
-    // Use raw SQL query since Supabase client schema cache doesn't see the new table
-    const { data, error } = await supabase.rpc('exec_sql_query', {
-      query: `SELECT * FROM language_namespaces WHERE locale = $1 AND namespace = $2 LIMIT 1`,
-      params: [locale, namespace]
-    });
+    // Calculate completion percentage dynamically
+    const { count: englishCount } = await supabase
+      .from("translations")
+      .select("*", { count: "exact", head: true })
+      .eq("locale", "en")
+      .eq("namespace", namespace);
 
-    if (error || !data || data.length === 0) return null;
-    return toCamelCase<LanguageNamespace>(data[0]);
+    const { count: langCount } = await supabase
+      .from("translations")
+      .select("*", { count: "exact", head: true })
+      .eq("locale", locale)
+      .eq("namespace", namespace);
+
+    const completionPercent =
+      englishCount && englishCount > 0
+        ? Math.round(((langCount || 0) / englishCount) * 100)
+        : 0;
+
+    const status = completionPercent >= 95 ? 'live' : 'draft';
+
+    return {
+      locale,
+      namespace,
+      status,
+      completionPercent,
+      updatedAt: new Date(),
+    };
   }
 
   async createLanguageNamespace(languageNamespace: InsertLanguageNamespace): Promise<LanguageNamespace> {
-    const snakeCaseData = toSnakeCase(languageNamespace);
-    
-    const { data, error } = await supabase
-      .from("language_namespaces")
-      .insert(snakeCaseData)
-      .select()
-      .single();
-
-    if (error) throw error;
-    return toCamelCase<LanguageNamespace>(data);
+    // No-op: we're calculating dynamically now
+    return {
+      ...languageNamespace,
+      updatedAt: new Date(),
+    };
   }
 
   async updateLanguageNamespace(
@@ -163,69 +200,19 @@ export class SupabaseStorage implements IStorage {
     namespace: string, 
     updates: Partial<LanguageNamespace>
   ): Promise<LanguageNamespace> {
-    const snakeCaseUpdates = toSnakeCase({ ...updates, updated_at: new Date().toISOString() });
-    
-    const { data, error } = await supabase
-      .from("language_namespaces")
-      .update(snakeCaseUpdates)
-      .eq("locale", locale)
-      .eq("namespace", namespace)
-      .select()
-      .single();
-
-    if (error) throw error;
-    return toCamelCase<LanguageNamespace>(data);
+    // No-op: we're calculating dynamically now
+    const current = await this.getLanguageNamespace(locale, namespace);
+    return {
+      ...current!,
+      ...updates,
+      updatedAt: new Date(),
+    };
   }
 
   async updateLanguageNamespaceCompletion(locale: string, namespace: string): Promise<void> {
-    // Skip completion calculation for English (source language)
-    if (locale === "en") {
-      // Ensure English namespace exists and is set to 100%
-      const existing = await this.getLanguageNamespace(locale, namespace);
-      if (existing) {
-        await this.updateLanguageNamespace(locale, namespace, { 
-          completionPercent: 100,
-          status: 'live'
-        });
-      } else {
-        await this.createLanguageNamespace({ 
-          locale, 
-          namespace, 
-          completionPercent: 100,
-          status: 'live'
-        });
-      }
-      return;
-    }
-
-    // Get total translations for this locale and namespace
-    const { count: targetCount } = await supabase
-      .from("translations")
-      .select("*", { count: "exact", head: true })
-      .eq("locale", locale)
-      .eq("namespace", namespace);
-
-    // Get total English translations for this namespace (source language)
-    const { count: englishCount } = await supabase
-      .from("translations")
-      .select("*", { count: "exact", head: true })
-      .eq("locale", "en")
-      .eq("namespace", namespace);
-
-    const completionPercent =
-      englishCount && englishCount > 0
-        ? Math.round(((targetCount || 0) / englishCount) * 100)
-        : 0;
-
-    // Check if language_namespace record exists
-    const existing = await this.getLanguageNamespace(locale, namespace);
-    
-    if (existing) {
-      await this.updateLanguageNamespace(locale, namespace, { completionPercent });
-    } else {
-      // Create new language_namespace record
-      await this.createLanguageNamespace({ locale, namespace, completionPercent, status: 'draft' });
-    }
+    // No-op: completion is calculated dynamically on-the-fly
+    // This method is kept for API compatibility but does nothing
+    return;
   }
 
   // Translations

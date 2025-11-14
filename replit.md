@@ -47,10 +47,14 @@ A centralized translation management system for managing multi-language content 
 - locale (VARCHAR 10) PRIMARY KEY
 - name (VARCHAR 50) - English name
 - native_name (VARCHAR 50) - Native name
-- status (VARCHAR 20) - 'draft', 'live', 'archived'
-- completion_percent (INT) - auto-calculated
+- status (VARCHAR 20) - global status: 'draft', 'live', 'archived' (for basic language availability)
+- completion_percent (INT) - global completion (not used for namespace-specific status)
 - display_order (INT) - sort order
 - updated_at (TIMESTAMP)
+
+**Note:** Language status and completion percentage are calculated **dynamically per namespace** based on translation coverage. When querying languages with `namespace` parameter, the API calculates:
+- `completionPercent`: `(translations in target language / translations in English) * 100` for that namespace
+- `status`: Automatically set to 'live' if completion ≥ 95%, otherwise 'draft'
 
 ### Project Structure
 ```
@@ -88,13 +92,14 @@ server/
 - Beautiful loading, error, and empty states
 - Responsive table with pagination
 
-### 2. Language Management
-- Grid of language cards showing completion stats
+### 2. Language Management (Namespace-Aware)
+- Grid of language cards showing completion stats **per selected namespace**
 - Add new language (creates draft status)
 - AI translate all keys in a namespace
-- Promote language from draft → live when 95%+ complete
+- Language status automatically promoted to 'live' when 95%+ complete in that namespace
 - Archive unused languages
-- Progress bars showing completion percentage
+- Progress bars showing completion percentage for the selected namespace
+- **Key feature:** Same language can be 'live' in one namespace and 'draft' in another
 
 ### 3. AI Translation (OpenAI)
 - Bulk translate from English to target language
@@ -167,6 +172,17 @@ server/
 - no (Norsk/Norwegian)
 
 ## Recent Changes
+- 2025-11-14: **Namespace-aware language status implementation**
+  - **Breaking change:** Language status and completion are now calculated **dynamically per namespace**
+  - Removed `language_namespaces` junction table - no longer needed with dynamic calculation
+  - Each language can have different status/completion % in different namespaces
+  - Example: Danish can be 'live' (100%) in "my-psilyou-dashboard" but 'draft' (0%) in "psilyou-website"
+  - Simplified architecture: Status calculated on-the-fly from `translations` table counts
+  - Fixed Supabase schema cache issues by avoiding separate junction table entirely
+  - API now requires `namespace` parameter for accurate language status
+  - Status automatically promoted to 'live' when completion ≥ 95% in that namespace
+  - Tested and verified with real data: "my-psilyou-dashboard" shows EN 100%, DA/SV 90%, others 0%
+
 - 2025-11-09: Production-ready MVP complete with all features working
   - Initial schema and frontend implementation complete
   - All components built following design_guidelines.md
