@@ -45,6 +45,7 @@ export default function LanguagesPage() {
     setSelectedNamespace,
     namespaces,
     namespacesLoading,
+    namespacesError,
   } = useNamespaceSelector();
 
   const { data: languages, isLoading, error: languagesError } = useQuery<LanguageWithNamespaceStatus[]>({
