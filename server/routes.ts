@@ -34,17 +34,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Recalculate completion percentages for all languages
+  // Recalculate completion percentages for all language-namespace combinations
   app.post("/api/setup/recalculate-completion", async (req, res) => {
     try {
+      const namespaces = await storage.getNamespaces();
       const languages = await storage.getAllLanguages();
-      for (const lang of languages) {
-        await storage.updateLanguageCompletion(lang.locale);
+      
+      for (const namespace of namespaces) {
+        for (const lang of languages) {
+          await storage.updateLanguageNamespaceCompletion(lang.locale, namespace);
+        }
       }
-      const updated = await storage.getAllLanguages();
+      
       res.json({
-        message: "Completion percentages updated successfully",
-        languages: updated,
+        message: "Completion percentages updated successfully for all namespaces",
+        namespacesProcessed: namespaces.length,
+        languagesProcessed: languages.length,
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -53,10 +58,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // PUBLIC ENDPOINTS - No authentication required
 
-  // Get all live languages for language switchers
+  // Get all live languages for a specific namespace (for language switchers)
   app.get("/api/languages", async (req, res) => {
     try {
-      const languages = await storage.getLiveLanguages();
+      const namespace = req.query.namespace as string;
+      if (!namespace) {
+        return res.status(400).json({ error: "namespace query parameter is required" });
+      }
+      
+      const languages = await storage.getLiveLanguagesForNamespace(namespace);
       res.json(languages);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -103,10 +113,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ADMIN ENDPOINTS - Require JWT authentication
 
-  // Get all languages (including draft and archived)
+  // Get all languages with status for a specific namespace
   app.get("/api/admin/languages", authenticateJWT, async (req, res) => {
     try {
-      const languages = await storage.getAllLanguages();
+      const namespace = req.query.namespace as string;
+      
+      if (!namespace) {
+        // If no namespace specified, return basic language list
+        const languages = await storage.getAllLanguages();
+        return res.json(languages);
+      }
+      
+      // Return languages with namespace-specific status
+      const languages = await storage.getLanguagesWithNamespaceStatus(namespace);
       res.json(languages);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -329,11 +348,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // Update completion percentage once at the end
-      await storage.updateLanguageCompletion(targetLocale);
+      // Update language-namespace completion percentage once at the end
+      await storage.updateLanguageNamespaceCompletion(targetLocale, namespace);
 
       res.json({
-        message: `AI translation completed: ${created.length} translations created`,
+        message: `AI translation completed: ${created.length} translations created for namespace "${namespace}"`,
         created: created.length,
         failed: failed.length,
         failures: failed,

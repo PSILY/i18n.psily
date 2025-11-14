@@ -4,6 +4,9 @@ import type {
   InsertTranslation,
   Language,
   InsertLanguage,
+  LanguageNamespace,
+  InsertLanguageNamespace,
+  LanguageWithNamespaceStatus,
   TranslationFilters,
   NamespaceStats,
   AnalyticsData,
@@ -12,11 +15,17 @@ import type {
 export interface IStorage {
   // Languages
   getAllLanguages(): Promise<Language[]>;
-  getLiveLanguages(): Promise<Language[]>;
+  getLanguagesWithNamespaceStatus(namespace: string): Promise<LanguageWithNamespaceStatus[]>;
+  getLiveLanguagesForNamespace(namespace: string): Promise<LanguageWithNamespaceStatus[]>;
   getLanguage(locale: string): Promise<Language | null>;
   createLanguage(language: InsertLanguage): Promise<Language>;
   updateLanguage(locale: string, updates: Partial<Language>): Promise<Language>;
-  updateLanguageCompletion(locale: string): Promise<void>;
+  
+  // Language-Namespace junction
+  getLanguageNamespace(locale: string, namespace: string): Promise<LanguageNamespace | null>;
+  createLanguageNamespace(languageNamespace: InsertLanguageNamespace): Promise<LanguageNamespace>;
+  updateLanguageNamespace(locale: string, namespace: string, updates: Partial<LanguageNamespace>): Promise<LanguageNamespace>;
+  updateLanguageNamespaceCompletion(locale: string, namespace: string): Promise<void>;
 
   // Translations
   getTranslations(filters?: TranslationFilters): Promise<Translation[]>;
@@ -59,15 +68,29 @@ export class SupabaseStorage implements IStorage {
     return toCamelCase<Language[]>(data || []);
   }
 
-  async getLiveLanguages(): Promise<Language[]> {
-    const { data, error } = await supabase
-      .from("languages")
-      .select("*")
-      .eq("status", "live")
-      .order("display_order");
+  async getLanguagesWithNamespaceStatus(namespace: string): Promise<LanguageWithNamespaceStatus[]> {
+    // Get all languages first
+    const languages = await this.getAllLanguages();
+    
+    // Then get namespace status for each language
+    const withStatus = await Promise.all(
+      languages.map(async (lang) => {
+        const langNamespace = await this.getLanguageNamespace(lang.locale, namespace);
+        return {
+          ...lang,
+          status: langNamespace?.status || 'draft',
+          completionPercent: langNamespace?.completionPercent || 0,
+        };
+      })
+    );
 
-    if (error) throw error;
-    return toCamelCase<Language[]>(data || []);
+    return withStatus;
+  }
+
+  async getLiveLanguagesForNamespace(namespace: string): Promise<LanguageWithNamespaceStatus[]> {
+    // Get all languages with namespace status, then filter for live ones
+    const allLanguages = await this.getLanguagesWithNamespaceStatus(namespace);
+    return allLanguages.filter(lang => lang.status === 'live');
   }
 
   async getLanguage(locale: string): Promise<Language | null> {
@@ -110,31 +133,99 @@ export class SupabaseStorage implements IStorage {
     return toCamelCase<Language>(data);
   }
 
-  async updateLanguageCompletion(locale: string): Promise<void> {
+  // Language-Namespace junction methods
+  async getLanguageNamespace(locale: string, namespace: string): Promise<LanguageNamespace | null> {
+    // Use raw SQL query since Supabase client schema cache doesn't see the new table
+    const { data, error } = await supabase.rpc('exec_sql_query', {
+      query: `SELECT * FROM language_namespaces WHERE locale = $1 AND namespace = $2 LIMIT 1`,
+      params: [locale, namespace]
+    });
+
+    if (error || !data || data.length === 0) return null;
+    return toCamelCase<LanguageNamespace>(data[0]);
+  }
+
+  async createLanguageNamespace(languageNamespace: InsertLanguageNamespace): Promise<LanguageNamespace> {
+    const snakeCaseData = toSnakeCase(languageNamespace);
+    
+    const { data, error } = await supabase
+      .from("language_namespaces")
+      .insert(snakeCaseData)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return toCamelCase<LanguageNamespace>(data);
+  }
+
+  async updateLanguageNamespace(
+    locale: string, 
+    namespace: string, 
+    updates: Partial<LanguageNamespace>
+  ): Promise<LanguageNamespace> {
+    const snakeCaseUpdates = toSnakeCase({ ...updates, updated_at: new Date().toISOString() });
+    
+    const { data, error } = await supabase
+      .from("language_namespaces")
+      .update(snakeCaseUpdates)
+      .eq("locale", locale)
+      .eq("namespace", namespace)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return toCamelCase<LanguageNamespace>(data);
+  }
+
+  async updateLanguageNamespaceCompletion(locale: string, namespace: string): Promise<void> {
     // Skip completion calculation for English (source language)
     if (locale === "en") {
-      await this.updateLanguage(locale, { completionPercent: 100 });
+      // Ensure English namespace exists and is set to 100%
+      const existing = await this.getLanguageNamespace(locale, namespace);
+      if (existing) {
+        await this.updateLanguageNamespace(locale, namespace, { 
+          completionPercent: 100,
+          status: 'live'
+        });
+      } else {
+        await this.createLanguageNamespace({ 
+          locale, 
+          namespace, 
+          completionPercent: 100,
+          status: 'live'
+        });
+      }
       return;
     }
 
-    // Get total translations for this locale
+    // Get total translations for this locale and namespace
     const { count: targetCount } = await supabase
       .from("translations")
       .select("*", { count: "exact", head: true })
-      .eq("locale", locale);
+      .eq("locale", locale)
+      .eq("namespace", namespace);
 
-    // Get total English translations (source language)
+    // Get total English translations for this namespace (source language)
     const { count: englishCount } = await supabase
       .from("translations")
       .select("*", { count: "exact", head: true })
-      .eq("locale", "en");
+      .eq("locale", "en")
+      .eq("namespace", namespace);
 
     const completionPercent =
       englishCount && englishCount > 0
         ? Math.round(((targetCount || 0) / englishCount) * 100)
         : 0;
 
-    await this.updateLanguage(locale, { completionPercent });
+    // Check if language_namespace record exists
+    const existing = await this.getLanguageNamespace(locale, namespace);
+    
+    if (existing) {
+      await this.updateLanguageNamespace(locale, namespace, { completionPercent });
+    } else {
+      // Create new language_namespace record
+      await this.createLanguageNamespace({ locale, namespace, completionPercent, status: 'draft' });
+    }
   }
 
   // Translations
@@ -207,8 +298,8 @@ export class SupabaseStorage implements IStorage {
 
     if (error) throw error;
 
-    // Update language completion
-    await this.updateLanguageCompletion(translation.locale);
+    // Update language-namespace completion
+    await this.updateLanguageNamespaceCompletion(translation.locale, translation.namespace);
 
     return toCamelCase<Translation>(data);
   }
@@ -247,10 +338,8 @@ export class SupabaseStorage implements IStorage {
 
     if (error) throw error;
 
-    // Update language completion if reviewed status changed
-    if (updates.reviewed !== undefined) {
-      await this.updateLanguageCompletion(locale);
-    }
+    // Update language-namespace completion
+    await this.updateLanguageNamespaceCompletion(locale, namespace);
 
     return toCamelCase<Translation>(data);
   }
@@ -260,7 +349,7 @@ export class SupabaseStorage implements IStorage {
     locale: string,
     namespace: string
   ): Promise<void> {
-    const { error } = await supabase
+    const { error} = await supabase
       .from("translations")
       .delete()
       .eq("key", key)
@@ -269,8 +358,8 @@ export class SupabaseStorage implements IStorage {
 
     if (error) throw error;
 
-    // Update language completion
-    await this.updateLanguageCompletion(locale);
+    // Update language-namespace completion
+    await this.updateLanguageNamespaceCompletion(locale, namespace);
   }
 
   // Analytics
@@ -282,8 +371,9 @@ export class SupabaseStorage implements IStorage {
 
     if (error) throw error;
 
-    const namespaces = [...new Set(data?.map((t) => t.namespace) || [])];
-    return namespaces;
+    const uniqueNamespaces = new Set<string>();
+    (data || []).forEach((t) => uniqueNamespaces.add(t.namespace));
+    return Array.from(uniqueNamespaces);
   }
 
   async getNamespaceStats(locale?: string): Promise<NamespaceStats[]> {
@@ -352,8 +442,9 @@ export class SupabaseStorage implements IStorage {
     const languages = await this.getAllLanguages();
     const untranslated: { namespace: string; keys: string[] }[] = [];
 
-    for (const [namespace, keys] of namespaceKeys.entries()) {
-      const missingKeys = new Set(keys);
+    const entries = Array.from(namespaceKeys.entries());
+    for (const [namespace, keys] of entries) {
+      const missingKeys = new Set(Array.from(keys));
 
       for (const lang of languages) {
         if (lang.locale === "en") continue;
@@ -400,11 +491,13 @@ export class SupabaseStorage implements IStorage {
     const reviewedPercent =
       totalKeys > 0 ? Math.round((totalReviewed / totalKeys) * 100) : 0;
 
+    // Note: languages no longer have completionPercent - this is now per namespace
+    // We'll calculate average from namespace stats instead
     const averageCompletion =
-      languages.length > 0
+      namespaceStats.length > 0
         ? Math.round(
-            languages.reduce((sum, lang) => sum + lang.completionPercent, 0) /
-              languages.length
+            namespaceStats.reduce((sum, ns) => sum + ns.completionPercent, 0) /
+              namespaceStats.length
           )
         : 0;
 
