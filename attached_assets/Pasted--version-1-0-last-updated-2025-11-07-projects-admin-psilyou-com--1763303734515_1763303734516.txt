@@ -1,0 +1,149 @@
+{
+  "version": "1.0",
+  "last_updated": "2025-11-07",
+  "projects": [
+    "admin.psilyou.com",
+    "psilyou.com/admin",
+    "i18n.psilyou.com"
+  ],
+  "jwt_structure": {
+    "algorithm": "HS256",
+    "token_format": "header.payload.signature",
+    "expiration": "7 days"
+  },
+  "payload_schema": {
+    "id": {
+      "type": "number",
+      "required": true,
+      "description": "User ID - MUST be number, not string"
+    },
+    "user_email": {
+      "type": "string",
+      "required": true,
+      "description": "User's email address"
+    },
+    "first_name": {
+      "type": "string",
+      "required": true,
+      "description": "User's first name"
+    },
+    "last_name": {
+      "type": "string",
+      "required": true,
+      "description": "User's last name"
+    },
+    "sub_type": {
+      "type": "number",
+      "required": true,
+      "description": "Subscription type - MUST be 2 for admin access"
+    },
+    "iat": {
+      "type": "number",
+      "required": true,
+      "description": "Issued at timestamp (auto-generated)"
+    },
+    "exp": {
+      "type": "number",
+      "required": true,
+      "description": "Expiration timestamp (auto-generated)"
+    }
+  },
+  "user_types": {
+    "1": {
+      "name": "Free",
+      "description": "Basic access with limited features",
+      "jwt_issued": false
+    },
+    "2": {
+      "name": "Admin",
+      "description": "Administrative access (full CRUD)",
+      "jwt_issued": true,
+      "sso_enabled": true
+    },
+    "3": {
+      "name": "Paid",
+      "description": "Premium features with full access",
+      "jwt_issued": false
+    },
+    "4": {
+      "name": "Early Access",
+      "description": "Beta features and early content",
+      "jwt_issued": false
+    }
+  },
+  "endpoints": {
+    "token_generation": {
+      "url": "https://admin.psilyou.com/api/auth/generate-sso-token",
+      "method": "POST",
+      "request": {
+        "userId": "number"
+      },
+      "response": {
+        "token": "string (JWT)"
+      },
+      "requires_admin": true
+    }
+  },
+  "validation_rules": [
+    "Verify signature using JWT_SECRET",
+    "Check token has not expired (exp > current time)",
+    "Validate all required claims exist",
+    "Verify sub_type === 2 for admin access",
+    "Ensure id field is number type",
+    "Handle errors gracefully without leaking token details"
+  ],
+  "security": {
+    "shared_secret": {
+      "env_var": "JWT_SECRET",
+      "minimum_length": 32,
+      "rotation_policy": "periodic (invalidates all tokens)"
+    },
+    "token_transmission": {
+      "method": "URL parameter (?token=)",
+      "risk_level": "medium",
+      "mitigation": [
+        "7-day expiration",
+        "HTTPS only",
+        "noopener,noreferrer flags",
+        "Immediate URL cleanup after extraction"
+      ]
+    }
+  },
+  "integration_guide": {
+    "steps": [
+      "Install jsonwebtoken package: npm install jsonwebtoken",
+      "Add JWT_SECRET to Replit Secrets (same value as other apps)",
+      "Implement token validation middleware",
+      "Add route to accept ?token= parameter",
+      "Verify sub_type === 2 for admin routes",
+      "Store validated user in session/cookie"
+    ]
+  },
+  "common_errors": {
+    "invalid_token": {
+      "cause": "JWT signature verification failed",
+      "solution": "Ensure JWT_SECRET is identical across all applications"
+    },
+    "not_admin": {
+      "cause": "Token generated for non-admin user (sub_type !== 2)",
+      "solution": "Only admin users should receive SSO tokens"
+    },
+    "token_expired": {
+      "cause": "Token older than 7 days",
+      "solution": "Generate a new token"
+    },
+    "id_type_error": {
+      "cause": "User ID is string instead of number",
+      "solution": "Use parseInt(user.id) when creating token payload"
+    }
+  },
+  "example_token_payload": {
+    "id": 24,
+    "user_email": "admin@psilyou.com",
+    "first_name": "Test",
+    "last_name": "Admin",
+    "sub_type": 2,
+    "iat": 1699368000,
+    "exp": 1699972800
+  }
+}
