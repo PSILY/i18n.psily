@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { authenticateJWT } from "./lib/auth";
-import { batchTranslate } from "./lib/openai";
+import { batchTranslate, translateText } from "./lib/openai";
 import { initializeDatabase, seedLanguages } from "./lib/supabase";
 import { insertTranslationSchema, insertLanguageSchema } from "@shared/schema";
 import { z } from "zod";
@@ -356,6 +356,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
         created: created.length,
         failed: failed.length,
         failures: failed,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // AI Translation for a single key
+  app.post("/api/admin/translations/ai-translate-single", authenticateJWT, async (req, res) => {
+    try {
+      const { key, namespace, targetLocale, sourceText } = req.body;
+
+      if (!key || !namespace || !targetLocale || !sourceText) {
+        return res
+          .status(400)
+          .json({ error: "key, namespace, targetLocale, and sourceText are required" });
+      }
+
+      // Get target language name
+      const targetLanguage = await storage.getLanguage(targetLocale);
+      if (!targetLanguage) {
+        return res.status(404).json({ error: "Target language not found" });
+      }
+
+      // Translate the single text
+      const translatedText = await translateText(
+        sourceText,
+        targetLanguage.nativeName
+      );
+
+      // Check if translation already exists
+      const existing = await storage.getTranslation(key, targetLocale, namespace);
+
+      let translation;
+      if (existing) {
+        // Update existing translation
+        translation = await storage.updateTranslation(key, targetLocale, namespace, {
+          text: translatedText,
+          reviewed: false,
+        });
+      } else {
+        // Create new translation
+        translation = await storage.createTranslation({
+          key,
+          locale: targetLocale,
+          text: translatedText,
+          namespace,
+          reviewed: false,
+        });
+      }
+
+      res.json({
+        message: "Translation completed successfully",
+        translation,
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });

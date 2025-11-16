@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Search, CheckCircle2, Circle, Languages } from "lucide-react";
+import { Search, CheckCircle2, Circle, Languages, Sparkles, Loader2 } from "lucide-react";
 import type { Translation, Language, TranslationFilters } from "@shared/schema";
 
 interface TranslationsByKey {
@@ -215,6 +215,50 @@ export default function TranslationsPage() {
       toast({
         title: "Error",
         description: error.message || "Failed to update translation",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const aiTranslateSingleMutation = useMutation({
+    mutationFn: async ({
+      key,
+      namespace,
+      targetLocale,
+      sourceText,
+    }: {
+      key: string;
+      namespace: string;
+      targetLocale: string;
+      sourceText: string;
+    }) => {
+      return await apiRequest("POST", "/api/admin/translations/ai-translate-single", {
+        key,
+        namespace,
+        targetLocale,
+        sourceText,
+      });
+    },
+    onSuccess: (data: any, variables) => {
+      const id = `${variables.key}-${variables.targetLocale}-${variables.namespace}`;
+      
+      // Update local state with the translated text
+      setEditingValues((prev) => ({
+        ...prev,
+        [id]: { text: data.translation.text, reviewed: false },
+      }));
+      
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/translations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/languages"] });
+      toast({
+        title: "Success",
+        description: "AI translation completed",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to translate",
         variant: "destructive",
       });
     },
@@ -485,15 +529,50 @@ export default function TranslationsPage() {
                         const currentValue = editingValues[id];
                         const language = languages?.find((l) => l.locale === t.locale);
 
+                        // Get English translation for AI translate button
+                        const englishTranslation = group.translations.find((tr) => tr.locale === "en");
+                        const hasEnglishText = englishTranslation && englishTranslation.text.trim();
+                        const isEnglish = t.locale === "en";
+
                         return (
                           <div key={id} className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <Badge variant="outline" className="text-xs font-mono">
-                                {t.locale}
-                              </Badge>
-                              <span className="text-xs text-muted-foreground">
-                                {language?.nativeName || t.locale}
-                              </span>
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <Badge variant="outline" className="text-xs font-mono">
+                                  {t.locale}
+                                </Badge>
+                                <span className="text-xs text-muted-foreground">
+                                  {language?.nativeName || t.locale}
+                                </span>
+                              </div>
+                              {!isEnglish && hasEnglishText && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-6 px-2 text-xs"
+                                  onClick={() => {
+                                    aiTranslateSingleMutation.mutate({
+                                      key: t.key,
+                                      namespace: t.namespace,
+                                      targetLocale: t.locale,
+                                      sourceText: englishTranslation.text,
+                                    });
+                                  }}
+                                  disabled={aiTranslateSingleMutation.isPending}
+                                  data-testid={`button-ai-translate-${t.key}-${t.locale}`}
+                                >
+                                  {aiTranslateSingleMutation.isPending && 
+                                   aiTranslateSingleMutation.variables?.key === t.key &&
+                                   aiTranslateSingleMutation.variables?.targetLocale === t.locale ? (
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                  ) : (
+                                    <>
+                                      <Sparkles className="w-3 h-3 mr-1" />
+                                      AI
+                                    </>
+                                  )}
+                                </Button>
+                              )}
                             </div>
                             <Textarea
                               value={currentValue?.text || ""}
