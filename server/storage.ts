@@ -234,10 +234,12 @@ export class SupabaseStorage implements IStorage {
       );
     }
 
-    // Sort by namespace first, then by key alphabetically for stable ordering
+    // Sort by namespace, key, and locale alphabetically for stable ordering
+    // This ensures translations don't jump around when edited
     query = query
       .order("namespace", { ascending: true })
       .order("key", { ascending: true })
+      .order("locale", { ascending: true })
       .limit(1000);
 
     const { data, error } = await query;
