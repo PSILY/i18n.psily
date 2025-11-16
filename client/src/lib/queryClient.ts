@@ -9,7 +9,14 @@ async function throwIfResNotOk(res: Response) {
 }
 
 function getAuthHeaders(): Record<string, string> {
-  const token = getAuthToken() || getMockToken();
+  // Try to get real token from localStorage first
+  let token = getAuthToken();
+  
+  // In development mode only, fall back to mock token if no real token exists
+  if (!token && import.meta.env.DEV) {
+    token = getMockToken();
+  }
+  
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
