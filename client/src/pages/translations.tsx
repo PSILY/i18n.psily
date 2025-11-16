@@ -48,9 +48,10 @@ export default function TranslationsPage() {
     queryKey: ["/api/admin/translations", filters],
   });
 
-  // Group translations by namespace + key (include ALL languages including English)
+  // Group translations by namespace + key and add placeholders for missing languages
   const translationsByKey: TranslationsByKey = {};
-  if (translations) {
+  if (translations && languages) {
+    // First, group existing translations
     translations.forEach((t) => {
       const compositeKey = `${t.namespace}::${t.key}`;
       if (!translationsByKey[compositeKey]) {
@@ -61,8 +62,28 @@ export default function TranslationsPage() {
           translations: [],
         };
       }
-      // Include ALL translations (including English)
       translationsByKey[compositeKey].translations.push(t);
+    });
+
+    // Then, for each group, add placeholder entries for missing languages
+    Object.values(translationsByKey).forEach((group) => {
+      const existingLocales = new Set(group.translations.map((t) => t.locale));
+      
+      // Add placeholders for languages that don't have translations yet
+      languages.forEach((lang) => {
+        if (!existingLocales.has(lang.locale)) {
+          // Create a placeholder translation object
+          group.translations.push({
+            key: group.key,
+            locale: lang.locale,
+            namespace: group.namespace,
+            text: "",
+            reviewed: false,
+            updatedAt: new Date(),
+            _isPlaceholder: true, // Mark as placeholder for create vs update logic
+          } as Translation & { _isPlaceholder?: boolean });
+        }
+      });
     });
   }
 
@@ -73,17 +94,31 @@ export default function TranslationsPage() {
     [id: string]: { translation: Translation; newText: string };
   }>({});
 
-  // Initialize editing values when translations load (include ALL languages)
+  // Initialize editing values when translations load (include placeholders for ALL languages)
   useEffect(() => {
-    if (translations) {
+    if (translations && languages) {
       const initialValues: typeof editingValues = {};
+      
+      // Add existing translations
       translations.forEach((t) => {
         const id = `${t.key}-${t.locale}-${t.namespace}`;
         initialValues[id] = { text: t.text, reviewed: t.reviewed };
       });
+      
+      // Add placeholders for missing languages
+      groupedKeys.forEach((group) => {
+        const existingLocales = new Set(group.translations.map((t) => t.locale));
+        languages.forEach((lang) => {
+          const id = `${group.key}-${lang.locale}-${group.namespace}`;
+          if (!existingLocales.has(lang.locale) && !initialValues[id]) {
+            initialValues[id] = { text: "", reviewed: false };
+          }
+        });
+      });
+      
       setEditingValues(initialValues);
     }
-  }, [translations]);
+  }, [translations, languages]);
 
   // Debounced autosave effect - saves 1 second after user stops typing
   useEffect(() => {
@@ -92,20 +127,62 @@ export default function TranslationsPage() {
     const timeoutId = setTimeout(() => {
       // Save all pending changes
       Object.entries(pendingSaves).forEach(([id, { translation, newText }]) => {
-        updateMutation.mutate({
-          key: translation.key,
-          locale: translation.locale,
-          namespace: translation.namespace,
-          updates: {
+        const isPlaceholder = (translation as Translation & { _isPlaceholder?: boolean })._isPlaceholder;
+        
+        if (isPlaceholder) {
+          // Create new translation
+          createMutation.mutate({
+            key: translation.key,
+            locale: translation.locale,
+            namespace: translation.namespace,
             text: newText,
-          },
-        });
+            reviewed: false,
+          });
+        } else {
+          // Update existing translation
+          updateMutation.mutate({
+            key: translation.key,
+            locale: translation.locale,
+            namespace: translation.namespace,
+            updates: {
+              text: newText,
+            },
+          });
+        }
       });
       setPendingSaves({});
     }, 1000); // 1 second debounce
 
     return () => clearTimeout(timeoutId);
   }, [pendingSaves]);
+
+  const createMutation = useMutation({
+    mutationFn: async (translation: {
+      key: string;
+      locale: string;
+      namespace: string;
+      text: string;
+      reviewed: boolean;
+    }) => {
+      return await apiRequest("POST", "/api/admin/translations", translation);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/translations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/languages"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/analytics"] });
+      toast({
+        title: "Success",
+        description: "Translation created successfully",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create translation",
+        variant: "destructive",
+      });
+    },
+  });
 
   const updateMutation = useMutation({
     mutationFn: async ({
@@ -170,6 +247,18 @@ export default function TranslationsPage() {
     const currentValue = editingValues[id];
     if (!currentValue) return;
 
+    const isPlaceholder = (translation as Translation & { _isPlaceholder?: boolean })._isPlaceholder;
+    
+    // Don't allow toggling review status on placeholders (must create first)
+    if (isPlaceholder) {
+      toast({
+        title: "No Translation",
+        description: "Please add translation text before marking as reviewed",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const newReviewed = !currentValue.reviewed;
     setEditingValues((prev) => ({
       ...prev,
@@ -192,14 +281,28 @@ export default function TranslationsPage() {
     
     // If there's a pending save for this field, save it immediately on blur
     if (pendingSaves[id]) {
-      updateMutation.mutate({
-        key: translation.key,
-        locale: translation.locale,
-        namespace: translation.namespace,
-        updates: {
+      const isPlaceholder = (translation as Translation & { _isPlaceholder?: boolean })._isPlaceholder;
+      
+      if (isPlaceholder) {
+        // Create new translation
+        createMutation.mutate({
+          key: translation.key,
+          locale: translation.locale,
+          namespace: translation.namespace,
           text: pendingSaves[id].newText,
-        },
-      });
+          reviewed: false,
+        });
+      } else {
+        // Update existing translation
+        updateMutation.mutate({
+          key: translation.key,
+          locale: translation.locale,
+          namespace: translation.namespace,
+          updates: {
+            text: pendingSaves[id].newText,
+          },
+        });
+      }
       
       // Remove from pending saves
       setPendingSaves((prev) => {
