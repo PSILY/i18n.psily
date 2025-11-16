@@ -234,7 +234,11 @@ export class SupabaseStorage implements IStorage {
       );
     }
 
-    query = query.order("updated_at", { ascending: false }).limit(1000);
+    // Sort by namespace first, then by key alphabetically for stable ordering
+    query = query
+      .order("namespace", { ascending: true })
+      .order("key", { ascending: true })
+      .limit(1000);
 
     const { data, error } = await query;
 
