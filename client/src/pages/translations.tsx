@@ -48,25 +48,21 @@ export default function TranslationsPage() {
     queryKey: ["/api/admin/translations", filters],
   });
 
-  // Group translations by namespace + key
+  // Group translations by namespace + key (include ALL languages including English)
   const translationsByKey: TranslationsByKey = {};
   if (translations) {
     translations.forEach((t) => {
       const compositeKey = `${t.namespace}::${t.key}`;
       if (!translationsByKey[compositeKey]) {
-        const englishTranslation = translations.find(
-          (tr) => tr.key === t.key && tr.locale === "en" && tr.namespace === t.namespace
-        );
         translationsByKey[compositeKey] = {
           key: t.key,
           namespace: t.namespace,
-          english: englishTranslation?.text || "",
+          english: "",
           translations: [],
         };
       }
-      if (t.locale !== "en") {
-        translationsByKey[compositeKey].translations.push(t);
-      }
+      // Include ALL translations (including English)
+      translationsByKey[compositeKey].translations.push(t);
     });
   }
 
@@ -77,15 +73,13 @@ export default function TranslationsPage() {
     [id: string]: { translation: Translation; newText: string };
   }>({});
 
-  // Initialize editing values when translations load
+  // Initialize editing values when translations load (include ALL languages)
   useEffect(() => {
     if (translations) {
       const initialValues: typeof editingValues = {};
       translations.forEach((t) => {
-        if (t.locale !== "en") {
-          const id = `${t.key}-${t.locale}-${t.namespace}`;
-          initialValues[id] = { text: t.text, reviewed: t.reviewed };
-        }
+        const id = `${t.key}-${t.locale}-${t.namespace}`;
+        initialValues[id] = { text: t.text, reviewed: t.reviewed };
       });
       setEditingValues(initialValues);
     }
@@ -354,8 +348,8 @@ export default function TranslationsPage() {
           groupedKeys.map((group) => (
             <Card key={`${group.key}-${group.namespace}`} className="p-6" data-testid={`card-translation-${group.key}`}>
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Column 1: Key + English */}
-                <div className="space-y-2">
+                {/* Column 1: Key + Namespace */}
+                <div className="space-y-3">
                   <div>
                     <Label className="text-xs text-muted-foreground">Translation Key</Label>
                     <code className="block text-sm font-mono text-foreground mt-1">
@@ -366,15 +360,9 @@ export default function TranslationsPage() {
                     <Label className="text-xs text-muted-foreground">Namespace</Label>
                     <p className="text-sm text-foreground mt-1">{group.namespace}</p>
                   </div>
-                  <div>
-                    <Label className="text-xs text-muted-foreground">English (Reference)</Label>
-                    <p className="text-sm text-foreground mt-1 p-3 bg-muted/30 rounded-md">
-                      {group.english || <span className="text-muted-foreground italic">No English translation</span>}
-                    </p>
-                  </div>
                 </div>
 
-                {/* Column 2: Other Languages */}
+                {/* Column 2: ALL Languages (including English) */}
                 <div className="space-y-3">
                   <Label className="text-xs text-muted-foreground">Translations</Label>
                   {group.translations.length === 0 ? (
@@ -382,36 +370,43 @@ export default function TranslationsPage() {
                       <p className="text-xs text-muted-foreground italic">No translations yet</p>
                     </div>
                   ) : (
-                    group.translations.map((t) => {
-                      const id = `${t.key}-${t.locale}-${t.namespace}`;
-                      const currentValue = editingValues[id];
-                      const language = languages?.find((l) => l.locale === t.locale);
+                    // Sort: English first, then alphabetically by locale
+                    group.translations
+                      .sort((a, b) => {
+                        if (a.locale === "en") return -1;
+                        if (b.locale === "en") return 1;
+                        return a.locale.localeCompare(b.locale);
+                      })
+                      .map((t) => {
+                        const id = `${t.key}-${t.locale}-${t.namespace}`;
+                        const currentValue = editingValues[id];
+                        const language = languages?.find((l) => l.locale === t.locale);
 
-                      return (
-                        <div key={id} className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="text-xs font-mono">
-                              {t.locale}
-                            </Badge>
-                            <span className="text-xs text-muted-foreground">
-                              {language?.nativeName || t.locale}
-                            </span>
+                        return (
+                          <div key={id} className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="text-xs font-mono">
+                                {t.locale}
+                              </Badge>
+                              <span className="text-xs text-muted-foreground">
+                                {language?.nativeName || t.locale}
+                              </span>
+                            </div>
+                            <Textarea
+                              value={currentValue?.text || ""}
+                              onChange={(e) => handleTextChange(id, e.target.value, t)}
+                              onBlur={() => handleBlur(t)}
+                              className="text-sm min-h-[60px] resize-none"
+                              data-testid={`input-translation-${t.key}-${t.locale}`}
+                              placeholder="Enter translation..."
+                            />
                           </div>
-                          <Textarea
-                            value={currentValue?.text || ""}
-                            onChange={(e) => handleTextChange(id, e.target.value, t)}
-                            onBlur={() => handleBlur(t)}
-                            className="text-sm min-h-[60px] resize-none"
-                            data-testid={`input-translation-${t.key}-${t.locale}`}
-                            placeholder="Enter translation..."
-                          />
-                        </div>
-                      );
-                    })
+                        );
+                      })
                   )}
                 </div>
 
-                {/* Column 3: Review Status */}
+                {/* Column 3: Review Status for ALL Languages */}
                 <div className="space-y-3">
                   <Label className="text-xs text-muted-foreground">Review Status</Label>
                   {group.translations.length === 0 ? (
@@ -419,39 +414,46 @@ export default function TranslationsPage() {
                       <Languages className="w-6 h-6 text-muted-foreground" />
                     </div>
                   ) : (
-                    group.translations.map((t) => {
-                      const id = `${t.key}-${t.locale}-${t.namespace}`;
-                      const currentValue = editingValues[id];
-                      const isReviewed = currentValue?.reviewed || false;
+                    // Sort: English first, then alphabetically by locale (matching column 2)
+                    group.translations
+                      .sort((a, b) => {
+                        if (a.locale === "en") return -1;
+                        if (b.locale === "en") return 1;
+                        return a.locale.localeCompare(b.locale);
+                      })
+                      .map((t) => {
+                        const id = `${t.key}-${t.locale}-${t.namespace}`;
+                        const currentValue = editingValues[id];
+                        const isReviewed = currentValue?.reviewed || false;
 
-                      return (
-                        <div key={id} className="flex items-center justify-between p-3 bg-muted/30 rounded-md">
-                          <span className="text-xs font-mono text-muted-foreground">{t.locale}</span>
-                          <Badge
-                            className={
-                              isReviewed
-                                ? "gap-1 bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20 cursor-pointer hover-elevate"
-                                : "gap-1 cursor-pointer hover-elevate"
-                            }
-                            variant={isReviewed ? "default" : "secondary"}
-                            onClick={() => handleReviewedToggle(t)}
-                            data-testid={`badge-reviewed-${t.key}-${t.locale}`}
-                          >
-                            {isReviewed ? (
-                              <>
-                                <CheckCircle2 className="w-3 h-3" />
-                                Reviewed
-                              </>
-                            ) : (
-                              <>
-                                <Circle className="w-3 h-3" />
-                                Draft
-                              </>
-                            )}
-                          </Badge>
-                        </div>
-                      );
-                    })
+                        return (
+                          <div key={id} className="flex items-center justify-between p-3 bg-muted/30 rounded-md">
+                            <span className="text-xs font-mono text-muted-foreground">{t.locale}</span>
+                            <Badge
+                              className={
+                                isReviewed
+                                  ? "gap-1 bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20 cursor-pointer hover-elevate"
+                                  : "gap-1 cursor-pointer hover-elevate"
+                              }
+                              variant={isReviewed ? "default" : "secondary"}
+                              onClick={() => handleReviewedToggle(t)}
+                              data-testid={`badge-reviewed-${t.key}-${t.locale}`}
+                            >
+                              {isReviewed ? (
+                                <>
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  Reviewed
+                                </>
+                              ) : (
+                                <>
+                                  <Circle className="w-3 h-3" />
+                                  Draft
+                                </>
+                              )}
+                            </Badge>
+                          </div>
+                        );
+                      })
                   )}
                 </div>
               </div>
