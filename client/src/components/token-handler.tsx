@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
-import { extractTokenFromUrl, isAuthenticated, redirectToLogin } from "@/lib/auth";
+import { extractHandoffFromUrl, redeemHandoffCode, isAuthenticated, redirectToLogin } from "@/lib/auth";
 import { Card } from "@/components/ui/card";
-import { Loader2 } from "lucide-react";
+import { Loader2, AlertCircle } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 
 interface TokenHandlerProps {
   children: React.ReactNode;
@@ -9,23 +11,66 @@ interface TokenHandlerProps {
 
 export function TokenHandler({ children }: TokenHandlerProps) {
   const [isValidating, setIsValidating] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Extract token from URL if present
-    extractTokenFromUrl();
+    async function handleAuthentication() {
+      try {
+        // Check if there's a handoff code in the URL
+        const handoffCode = extractHandoffFromUrl();
 
-    // Check authentication status
-    const authenticated = isAuthenticated();
+        if (handoffCode) {
+          // Redeem the handoff code for a JWT token
+          const result = await redeemHandoffCode(handoffCode);
 
-    if (!authenticated && !import.meta.env.DEV) {
-      // In production, redirect to admin.psilyou.com if not authenticated
-      redirectToLogin();
-      return;
+          if (!result.success) {
+            setError(result.error || "Failed to authenticate");
+            setIsValidating(false);
+            return;
+          }
+        }
+
+        // Check authentication status
+        const authenticated = isAuthenticated();
+
+        if (!authenticated && !import.meta.env.DEV) {
+          // In production, redirect to psilyou.com if not authenticated
+          redirectToLogin();
+          return;
+        }
+
+        // Validation complete
+        setIsValidating(false);
+      } catch (err: any) {
+        setError(err.message || "Unexpected authentication error");
+        setIsValidating(false);
+      }
     }
 
-    // Validation complete
-    setIsValidating(false);
+    handleAuthentication();
   }, []);
+
+  // Show error state
+  if (error) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-background p-4">
+        <Card className="p-8 max-w-md">
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Authentication Failed</AlertTitle>
+            <AlertDescription className="mt-2">
+              {error}
+            </AlertDescription>
+          </Alert>
+          <div className="mt-4 flex justify-center">
+            <Button onClick={() => redirectToLogin()} data-testid="button-retry-login">
+              Try Again
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   // Show loading state while validating
   if (isValidating) {
