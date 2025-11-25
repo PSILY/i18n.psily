@@ -80,13 +80,16 @@ I want iterative development. I prefer detailed explanations. Ask before making 
 - Feed of recently updated translations.
 - List of untranslated keys grouped by namespace.
 
-**5. Authentication (Client-side SSO):**
-- Uses client-side SSO via handoff codes from `psilyou.com`.
+**5. Authentication (Local Handoff Redemption):**
+- Uses handoff codes from `psilyou.com` with **local redemption endpoint**.
 - Application receives `handoff` codes via URL parameter (e.g., `?handoff=CODE`).
-- Redeems codes for JWTs by calling the `psilyou.com` API.
-- Stores JWT in localStorage and uses it for all API calls to the application's backend.
+- Redeems codes via **local** `/api/auth/redeem-handoff/:code` endpoint.
+- Local endpoint queries **shared Supabase** `handoff_tokens` table directly.
+- Issues JWT using **shared JWT_SECRET** (must match across all Repls).
+- Stores JWT in localStorage and uses it for all API calls.
 - Backend validates JWT for `admin` access (`sub_type === 2`).
 - Public endpoints (`/api/languages`, `/api/translations/:locale/:namespace`) do not require authentication.
+- Background cleanup job removes expired handoff tokens every 5 minutes.
 
 ### Design System
 
@@ -103,6 +106,6 @@ I want iterative development. I prefer detailed explanations. Ask before making 
 
 ## External Dependencies
 
-- **Supabase:** PostgreSQL database for all translation data persistence.
+- **Supabase:** PostgreSQL database for all translation data and handoff token redemption.
 - **OpenAI:** Used for AI translation services via Replit AI Integrations.
-- **psilyou.com API:** For redeeming handoff codes to obtain JWT tokens for authentication.
+- **psilyou.com:** Creates handoff tokens and redirects users with `?handoff=CODE`.

@@ -1,11 +1,13 @@
 // JWT token management for admin authentication via handoff codes
-// This app receives handoff codes from psilyou.com and redeems them for JWT tokens
-// Architecture: Client-only SSO integration with psilyou.com
+// This app receives handoff codes from psilyou.com and redeems them locally
+// Architecture: Local handoff redemption endpoint queries shared Supabase database
 // See: Handoff SSO Integration documentation
 
 const TOKEN_KEY = "admin_jwt_token";
 const PSILYOU_BASE_URL = import.meta.env.PROD ? "https://psilyou.com" : "http://localhost:5000";
-const HANDOFF_REDEEM_URL = `${PSILYOU_BASE_URL}/api/auth/redeem-handoff`;
+
+// Local endpoint for redeeming handoff codes (queries shared Supabase directly)
+const HANDOFF_REDEEM_URL = "/api/auth/redeem-handoff";
 
 export interface DecodedToken {
   id: number;
@@ -36,19 +38,16 @@ export function extractHandoffFromUrl(): string | null {
   return null;
 }
 
-// Redeem handoff code for JWT token
+// Redeem handoff code for JWT token (calls local endpoint)
 export async function redeemHandoffCode(code: string): Promise<{ success: boolean; error?: string }> {
   try {
     const response = await fetch(`${HANDOFF_REDEEM_URL}/${code}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      method: "GET",
     });
 
     if (!response.ok) {
       const error = await response.json();
-      return { success: false, error: error.error || "Failed to redeem handoff code" };
+      return { success: false, error: error.message || "Failed to redeem handoff code" };
     }
 
     const data = await response.json();

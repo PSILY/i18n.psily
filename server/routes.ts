@@ -6,6 +6,7 @@ import { batchTranslate, translateText } from "./lib/openai";
 import { initializeDatabase, seedLanguages } from "./lib/supabase";
 import { insertTranslationSchema, insertLanguageSchema } from "@shared/schema";
 import { z } from "zod";
+import { redeemHandoffToken, startCleanupJob } from "./handoff-auth";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Database initialization endpoint (for setup)
@@ -53,6 +54,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Start handoff token cleanup job
+  startCleanupJob();
+
+  // HANDOFF AUTHENTICATION - Redeem handoff code for JWT
+  app.get("/api/auth/redeem-handoff/:code", async (req, res) => {
+    try {
+      const { code } = req.params;
+      
+      if (!code) {
+        return res.status(400).json({ message: "Handoff code required" });
+      }
+
+      const ipAddress = req.ip || req.socket.remoteAddress;
+      const result = await redeemHandoffToken(code, ipAddress);
+
+      if (!result.success) {
+        return res.status(400).json({ message: result.error });
+      }
+
+      res.json({ 
+        token: result.jwt,
+        message: "Handoff code redeemed successfully" 
+      });
+    } catch (error) {
+      console.error("[HANDOFF] Redeem handoff error:", error);
+      res.status(500).json({ message: "Failed to redeem handoff code" });
     }
   });
 
