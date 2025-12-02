@@ -104,8 +104,144 @@ I want iterative development. I prefer detailed explanations. Ask before making 
 - Heading sizes: 2xl (page titles), lg (section headers), base (card titles).
 - Body: sm (14px) for data tables, xs (12px) for metadata.
 
+## API Reference
+
+### Public Endpoints (No Authentication)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/languages?namespace=X` | GET | Get live languages for a namespace (for language switchers) |
+| `/api/translations/:locale/:namespace` | GET | Get all translations for a locale/namespace (for i18next) |
+| `/api/translations/missing` | POST | Log missing translation keys from client apps |
+
+### Service-to-Service Endpoints (API Key Authentication)
+
+These endpoints allow other psilyou Repls to register translation keys automatically.
+
+**Authentication:** Include `x-api-key` header with `I18N_SERVICE_API_KEY` value.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/service/translations/register` | POST | Bulk register translation keys |
+| `/api/service/translations/register-single` | POST | Register a single translation key |
+| `/api/service/languages?namespace=X` | GET | Get languages with detailed status for a namespace |
+
+#### Bulk Register Keys
+
+```javascript
+// POST /api/service/translations/register
+// Headers: { "x-api-key": "YOUR_I18N_SERVICE_API_KEY" }
+{
+  "namespace": "liv-psilyou",
+  "keys": [
+    { "key": "buttons.submit", "text": "Submit" },
+    { "key": "messages.success", "text": "Operation successful" }
+  ]
+}
+
+// Response:
+{
+  "message": "Registered 2 keys, skipped 0 existing keys",
+  "created": ["buttons.submit", "messages.success"],
+  "skipped": [],
+  "failed": [],
+  "namespace": "liv-psilyou"
+}
+```
+
+#### Register Single Key
+
+```javascript
+// POST /api/service/translations/register-single
+// Headers: { "x-api-key": "YOUR_I18N_SERVICE_API_KEY" }
+{
+  "namespace": "liv-psilyou",
+  "key": "buttons.submit",
+  "text": "Submit",
+  "locale": "en" // optional, defaults to "en"
+}
+
+// Response:
+{
+  "message": "Translation created",
+  "translation": { ... },
+  "action": "created" // or "updated" if key already existed
+}
+```
+
+### Admin Endpoints (JWT Authentication)
+
+These require Bearer token from handoff authentication.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/admin/translations` | GET | Get translations with filters |
+| `/api/admin/translations` | POST | Create a translation |
+| `/api/admin/translations/:key/:locale/:namespace` | PATCH | Update a translation |
+| `/api/admin/translations/:key/:locale/:namespace` | DELETE | Delete a translation |
+| `/api/admin/translations/ai-translate` | POST | Bulk AI translate for namespace |
+| `/api/admin/translations/ai-translate-single` | POST | AI translate single key |
+| `/api/admin/languages` | GET | Get all languages with namespace status |
+| `/api/admin/analytics` | GET | Get analytics data |
+
 ## External Dependencies
 
 - **Supabase:** PostgreSQL database for all translation data and handoff token redemption.
 - **OpenAI:** Used for AI translation services via Replit AI Integrations.
 - **psilyou.com:** Creates handoff tokens and redirects users with `?handoff=CODE`.
+
+## Integration Guide for Other Repls
+
+### Setup in Other Repls
+
+1. Add `I18N_SERVICE_API_KEY` as a secret (same value as this Repl)
+2. Create an i18n client module:
+
+```javascript
+// lib/i18n-client.js
+const I18N_API_URL = "https://i18n.psilyou.com";
+const API_KEY = process.env.I18N_SERVICE_API_KEY;
+
+export async function registerTranslationKeys(namespace, keys) {
+  const response = await fetch(`${I18N_API_URL}/api/service/translations/register`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": API_KEY
+    },
+    body: JSON.stringify({ namespace, keys })
+  });
+  return response.json();
+}
+
+export async function getLanguages(namespace) {
+  const response = await fetch(`${I18N_API_URL}/api/languages?namespace=${namespace}`);
+  return response.json();
+}
+
+export async function getTranslations(locale, namespace) {
+  const response = await fetch(`${I18N_API_URL}/api/translations/${locale}/${namespace}`);
+  return response.json();
+}
+```
+
+### Usage in admin.psilyou.com
+
+When creating topics/questions, register the translation keys:
+
+```javascript
+// After creating a topic with slug "grief"
+await registerTranslationKeys("liv-psilyou", [
+  { key: "topics.grief.name", text: "Grief & Loss" },
+  { key: "topics.grief.description", text: "Understanding and navigating..." }
+]);
+```
+
+### Usage in liv.psilyou.com
+
+Fetch translations at runtime:
+
+```javascript
+const translations = await getTranslations("da", "liv-psilyou");
+// Returns: { "buttons.yes": "Ja", "topics.grief.name": "Sorg og tab", ... }
+```

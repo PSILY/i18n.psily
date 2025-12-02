@@ -190,7 +190,10 @@ export class SupabaseStorage implements IStorage {
   async createLanguageNamespace(languageNamespace: InsertLanguageNamespace): Promise<LanguageNamespace> {
     // No-op: we're calculating dynamically now
     return {
-      ...languageNamespace,
+      locale: languageNamespace.locale,
+      namespace: languageNamespace.namespace,
+      status: languageNamespace.status || 'draft',
+      completionPercent: languageNamespace.completionPercent || 0,
       updatedAt: new Date(),
     };
   }
