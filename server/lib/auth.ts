@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 
 const JWT_SECRET = process.env.JWT_SECRET;
+const I18N_SERVICE_API_KEY = process.env.I18N_SERVICE_API_KEY;
 
 if (!JWT_SECRET) {
   throw new Error("JWT_SECRET environment variable is required");
@@ -77,4 +78,23 @@ export function authenticateJWT(req: Request, res: Response, next: NextFunction)
     }
     return res.status(403).json({ error: "Token validation failed" });
   }
+}
+
+// Service-to-service API key authentication for other psilyou Repls
+export function authenticateServiceApiKey(req: Request, res: Response, next: NextFunction) {
+  if (!I18N_SERVICE_API_KEY) {
+    return res.status(500).json({ error: "Service API key not configured" });
+  }
+
+  const apiKey = req.headers["x-api-key"] as string;
+
+  if (!apiKey) {
+    return res.status(401).json({ error: "Missing x-api-key header" });
+  }
+
+  if (apiKey !== I18N_SERVICE_API_KEY) {
+    return res.status(403).json({ error: "Invalid API key" });
+  }
+
+  next();
 }

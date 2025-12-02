@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { authenticateJWT } from "./lib/auth";
+import { authenticateJWT, authenticateServiceApiKey } from "./lib/auth";
 import { batchTranslate, translateText } from "./lib/openai";
 import { initializeDatabase, seedLanguages } from "./lib/supabase";
 import { insertTranslationSchema, insertLanguageSchema } from "@shared/schema";
@@ -450,6 +450,142 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const analytics = await storage.getAnalytics();
       res.json(analytics);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // SERVICE-TO-SERVICE ENDPOINTS - Use API key authentication
+  // These endpoints allow other psilyou Repls to register translation keys automatically
+
+  // Bulk register translation keys (creates English entries that need translation)
+  app.post("/api/service/translations/register", authenticateServiceApiKey, async (req, res) => {
+    try {
+      const { namespace, keys } = req.body;
+
+      if (!namespace || !keys || !Array.isArray(keys)) {
+        return res.status(400).json({
+          error: "namespace and keys array are required",
+          example: {
+            namespace: "liv-psilyou",
+            keys: [
+              { key: "buttons.submit", text: "Submit" },
+              { key: "messages.success", text: "Operation successful" }
+            ]
+          }
+        });
+      }
+
+      const created: string[] = [];
+      const skipped: string[] = [];
+      const failed: { key: string; error: string }[] = [];
+
+      for (const item of keys) {
+        if (!item.key || !item.text) {
+          failed.push({ key: item.key || "unknown", error: "Missing key or text" });
+          continue;
+        }
+
+        try {
+          // Check if English translation already exists
+          const existing = await storage.getTranslation(item.key, "en", namespace);
+          
+          if (existing) {
+            skipped.push(item.key);
+            continue;
+          }
+
+          // Create English translation (source language)
+          await storage.createTranslation({
+            key: item.key,
+            locale: "en",
+            namespace,
+            text: item.text,
+            reviewed: true, // English source is considered reviewed
+          });
+
+          created.push(item.key);
+        } catch (error: any) {
+          failed.push({ key: item.key, error: error.message });
+        }
+      }
+
+      res.status(201).json({
+        message: `Registered ${created.length} keys, skipped ${skipped.length} existing keys`,
+        created,
+        skipped,
+        failed,
+        namespace,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Register a single translation key
+  app.post("/api/service/translations/register-single", authenticateServiceApiKey, async (req, res) => {
+    try {
+      const { namespace, key, text, locale = "en" } = req.body;
+
+      if (!namespace || !key || !text) {
+        return res.status(400).json({
+          error: "namespace, key, and text are required",
+          example: {
+            namespace: "liv-psilyou",
+            key: "buttons.submit",
+            text: "Submit",
+            locale: "en" // optional, defaults to "en"
+          }
+        });
+      }
+
+      // Check if translation already exists
+      const existing = await storage.getTranslation(key, locale, namespace);
+      
+      if (existing) {
+        // Update existing translation
+        const updated = await storage.updateTranslation(key, locale, namespace, { text });
+        return res.json({
+          message: "Translation updated",
+          translation: updated,
+          action: "updated"
+        });
+      }
+
+      // Create new translation
+      const translation = await storage.createTranslation({
+        key,
+        locale,
+        namespace,
+        text,
+        reviewed: locale === "en", // English source is considered reviewed
+      });
+
+      res.status(201).json({
+        message: "Translation created",
+        translation,
+        action: "created"
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get active languages for a namespace (public version already exists at /api/languages)
+  // This endpoint includes more details for service integrations
+  app.get("/api/service/languages", authenticateServiceApiKey, async (req, res) => {
+    try {
+      const namespace = req.query.namespace as string;
+      if (!namespace) {
+        return res.status(400).json({ error: "namespace query parameter is required" });
+      }
+
+      const languages = await storage.getLanguagesWithNamespaceStatus(namespace);
+      res.json({
+        namespace,
+        languages,
+        liveLanguages: languages.filter(l => l.status === "live").map(l => l.locale),
+      });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
