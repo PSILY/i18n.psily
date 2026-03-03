@@ -1,4 +1,4 @@
-// Supabase Users table for authentication
+// Supabase users table for authentication
 export interface User {
   id: number;
   user_email: string;

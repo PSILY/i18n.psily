@@ -5,7 +5,7 @@ export class SupabaseAuthStorage {
   // Get user by ID
   async getUser(id: number): Promise<User | undefined> {
     const { data, error } = await supabaseAdmin
-      .from('Users')
+      .from('users')
       .select('*')
       .eq('id', id)
       .single();
@@ -21,7 +21,7 @@ export class SupabaseAuthStorage {
   // Get user by email
   async getUserByEmail(email: string): Promise<User | undefined> {
     const { data, error } = await supabaseAdmin
-      .from('Users')
+      .from('users')
       .select('*')
       .eq('user_email', email)
       .single();
