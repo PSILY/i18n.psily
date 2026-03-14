@@ -1,6 +1,6 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
-import { setupVite, serveStatic, log } from "./vite";
+import { serveStatic, log } from "./static";
 
 const app = express();
 
@@ -57,6 +57,9 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 if (process.env.NODE_ENV !== 'production') {
+  // Dynamic import: esbuild eliminates this entire branch (and the vite import)
+  // when NODE_ENV is defined as "production" at build time.
+  const { setupVite } = await import('./vite');
   await setupVite(app, server);
   const port = parseInt(process.env.PORT || '5000', 10);
   server.listen({
