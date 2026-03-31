@@ -571,6 +571,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Bulk upsert translations from other services (e.g. admin.psilyou saving translated content)
+  app.post("/api/service/translations/upsert", authenticateServiceApiKey, async (req, res) => {
+    try {
+      const { translations } = req.body;
+      if (!Array.isArray(translations)) {
+        return res.status(400).json({ error: "translations (array) is required" });
+      }
+
+      const results: { key: string; locale: string; action: string }[] = [];
+      const errors: { key: string; locale: string; error: string }[] = [];
+
+      for (const t of translations) {
+        const { key, locale, namespace, text } = t;
+        if (!key || !locale || !namespace || text === undefined) {
+          errors.push({ key, locale, error: "key, locale, namespace, and text are required" });
+          continue;
+        }
+        try {
+          const existing = await storage.getTranslation(key, locale, namespace);
+          if (existing) {
+            await storage.updateTranslation(key, locale, namespace, { text });
+            results.push({ key, locale, action: "updated" });
+          } else {
+            await storage.createTranslation({ key, locale, namespace, text, reviewed: locale === "en" });
+            results.push({ key, locale, action: "created" });
+          }
+        } catch (e: any) {
+          errors.push({ key, locale, error: e.message });
+        }
+      }
+
+      res.json({ success: results, errors });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Get active languages for a namespace (public version already exists at /api/languages)
   // This endpoint includes more details for service integrations
   app.get("/api/service/languages", authenticateServiceApiKey, async (req, res) => {
