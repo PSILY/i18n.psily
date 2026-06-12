@@ -2,12 +2,21 @@ import OpenAI from "openai";
 import pLimit from "p-limit";
 import pRetry from "p-retry";
 
-// This is using Replit's AI Integrations service, which provides OpenAI-compatible API access without requiring your own OpenAI API key.
-// Blueprint reference: javascript_openai_ai_integrations
-const openai = new OpenAI({
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-});
+// Lazy-initialised so missing Replit AI env vars don't crash the Lambda on cold start.
+// AI translation endpoints simply return an error when the client isn't available.
+let _openai: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!_openai) {
+    if (!process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
+      throw new Error("AI_INTEGRATIONS_OPENAI_API_KEY is not set — AI translation is unavailable in this environment.");
+    }
+    _openai = new OpenAI({
+      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+    });
+  }
+  return _openai;
+}
 
 // Helper function to check if error is rate limit or quota violation
 function isRateLimitError(error: any): boolean {
@@ -54,7 +63,7 @@ Respond with ONLY the translated text, nothing else.`;
   return await pRetry(
     async () => {
       try {
-        const response = await openai.chat.completions.create({
+        const response = await getOpenAI().chat.completions.create({
           model: "gpt-5", // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
           messages: [{ role: "user", content: prompt }],
           max_completion_tokens: 1000,
